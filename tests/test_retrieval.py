@@ -27,6 +27,28 @@ def test_sentence_queries_with_particles_and_compounds():
     assert search(demo_companies(), SearchRequest(query='반도체가 필요해요')) == []
 
 
+def test_takeout_food_is_not_a_packaging_supplier():
+    from trade_itsuda.models import Company
+    shops = [Company(id='food', name='가상분식', industry='기타 간이', products='김밥/만두/분식 / 간이 음식 포장 판매 전문점',
+                     region='제주시 이도1동', source_name='테스트', source_date='2025-09-18'),
+             Company(id='pack', name='가상포장', industry='기타 사업 서비스', products='포장/충전업 / 포장 및 충전업',
+                     region='제주시 이도1동', source_name='테스트', source_date='2025-09-18')]
+    hits = search(shops, SearchRequest(query='포장 박스가 필요해요'))
+    assert [h.company.id for h in hits] == ['pack']
+    assert hits[0].reasons[0] == '생산품에서 일치: 포장'
+
+
+def test_name_only_matches_yield_to_product_matches():
+    from trade_itsuda.models import Company
+    def shop(cid, name, products):
+        return Company(id=cid, name=name, industry='기타', products=products, region='제주시 연동',
+                       source_name='테스트', source_date='2025-09-18')
+    shops = [shop('salon', '중앙로박스', '미용실 / 두발 미용업'), shop('pack', '가상상회', '포장/충전업 / 포장 및 충전업')]
+    assert [h.company.id for h in search(shops, SearchRequest(query='박스'))] == ['pack']
+    # 업체명을 그대로 입력하면(기존 거래처 이름 검색) 그 업체가 맨 앞에 온다.
+    assert search(shops, SearchRequest(query='중앙로박스'))[0].company.id == 'salon'
+
+
 def test_semantic_is_filtered_and_labelled():
     class Encoder:
         def encode(self, texts, **kwargs):
