@@ -23,7 +23,11 @@ def test_validation_rejects_spec_sheet_and_skips_duplicate_rows():
     row = '가상,인쇄,라벨,제주시,20251101'
     parsed = parse_file(('name,industry,products,region,source_date\n' + row + '\n' + row).encode(), 'x.csv', '출처')
     assert len(parsed.records) == 1
-    assert parsed.skipped == {'같은 기업 식별자 반복 (첫 행만 사용)': [3]}
+    assert parsed.skipped == {'같은 업체의 완전히 같은 행 (중복 제외)': [3]}
+    other = '가상,인쇄,스티커,제주시,20251101'
+    parsed = parse_file(('name,industry,products,region,source_date\n' + row + '\n' + other).encode(), 'x.csv', '출처')
+    assert [c.products for c in parsed.records] == ['라벨 ; 스티커']
+    assert parsed.skipped == {'같은 업체의 다른 업종 행 (첫 행 생산품에 병합)': [3]}
 
 
 def test_invalid_rows_are_skipped_with_reasons():

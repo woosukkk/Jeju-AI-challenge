@@ -89,8 +89,8 @@ def parse_file(content: bytes, filename: str, source_name: str, source_date: dat
     source_name = source_name.strip()
     if not source_name:
         raise ValueError('출처명을 입력하세요.')
-    records = []
-    ids = set()
+    records: list[Company] = []
+    ids: dict[str, int] = {}
     skipped: dict[str, list[int]] = {}
     for index, row in enumerate(frame.to_dict('records'), start=2):
         raw = {key: str(row.get(key, '')).strip() for key in
@@ -109,9 +109,18 @@ def parse_file(content: bytes, filename: str, source_name: str, source_date: dat
             skipped.setdefault(skip_reason(error), []).append(index)
             continue
         if company_id in ids:
-            skipped.setdefault('같은 기업 식별자 반복 (첫 행만 사용)', []).append(index)
+            first = records[ids[company_id]]
+            merged = f'{first.products} ; {company.products}'
+            if company.products in first.products.split(' ; '):
+                skipped.setdefault('같은 업체의 완전히 같은 행 (중복 제외)', []).append(index)
+            elif len(merged) <= 3000:
+                # 같은 업체가 업종을 여러 개 등록한 행: 첫 행의 업종을 유지하고 생산품 검색어에 합친다.
+                records[ids[company_id]] = first.model_copy(update={'products': merged})
+                skipped.setdefault('같은 업체의 다른 업종 행 (첫 행 생산품에 병합)', []).append(index)
+            else:
+                skipped.setdefault('같은 업체의 다른 업종 행 (생산품이 길어 제외)', []).append(index)
             continue
-        ids.add(company_id)
+        ids[company_id] = len(records)
         records.append(company)
     if not records:
         summary = ', '.join(f'{reason} {len(rows)}행' for reason, rows in skipped.items())
