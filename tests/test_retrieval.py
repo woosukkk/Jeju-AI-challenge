@@ -49,6 +49,14 @@ def test_name_only_matches_yield_to_product_matches():
     assert search(shops, SearchRequest(query='중앙로박스'))[0].company.id == 'salon'
 
 
+def test_industry_filter_accepts_sub_category_names():
+    from trade_itsuda.models import Company
+    sign = Company(id='sign', name='가상간판', industry='인쇄·제품제작', products='명함/간판/광고물 제작 / 간판 및 광고물 제조업',
+                   region='제주시 연동', source_name='테스트', source_date='2025-09-18')
+    assert search([sign], SearchRequest(query='간판', industry='명함/간판/광고물 제작'))[0].company.id == 'sign'
+    assert search([sign], SearchRequest(query='간판', industry='한식')) == []
+
+
 def test_semantic_is_filtered_and_labelled():
     class Encoder:
         def encode(self, texts, **kwargs):

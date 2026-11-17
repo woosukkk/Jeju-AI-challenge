@@ -79,8 +79,9 @@ def load_encoder(model_path: str):
 
 
 def search(records: list[Company], request: SearchRequest, encoder=None) -> list[SearchHit]:
+    # 업종 조건은 중분류(업종)뿐 아니라 소분류·표준산업분류(생산품 칸)로 적어도 걸리게 한다.
     filtered = [c for c in records if (not request.region or request.region in c.region)
-                and (not request.industry or request.industry in c.industry)]
+                and (not request.industry or request.industry in c.industry or request.industry in c.products)]
     if not filtered:
         return []
     terms = tokens(request.query)

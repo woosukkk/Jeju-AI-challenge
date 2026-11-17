@@ -35,7 +35,7 @@ def count_by_region(records: list[Company], query: str, industry: str = '', limi
     groups = tokens(query)
     counts: Counter[str] = Counter()
     for company in records:
-        if industry and industry not in company.industry:
+        if industry and industry not in company.industry and industry not in company.products:
             continue
         if groups and matches(company, groups):
             counts[company.region] += 1
