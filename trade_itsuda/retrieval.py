@@ -95,7 +95,6 @@ def search(records: list[Company], request: SearchRequest, encoder=None) -> list
         vectors = vectors / np.maximum(norms, 1e-12)
         semantic = vectors[1:] @ vectors[0]
     hits = []
-    name_only: set[str] = set()
     for index, company in enumerate(filtered):
         evidence = []
         weight = 0
@@ -109,12 +108,10 @@ def search(records: list[Company], request: SearchRequest, encoder=None) -> list
         if encoder is not None and weight == 0:
             evidence.append('의미 검색 탐색 후보: 실제 취급 품목은 업체 확인 필요')
         typed_name = re.sub(r'\s+', '', company.name.lower()) in re.sub(r'\s+', '', request.query.lower())
+        # 상호에 품목 낱말만 들어간 업소(예: '○○박스' 미용실)는 취급 근거가 아니므로 뺀다.
+        # 사용자가 업체명을 통째로 입력한 경우(기존 거래처 찾기)만 남기고 맨 앞에 둔다.
         if evidence and all(reason.startswith('업체명') for reason in evidence) and not typed_name:
-            name_only.add(company.id)
-        # 사용자가 업체명을 그대로 입력했으면(기존 거래처 찾기) 그 업체를 맨 앞에 둔다.
+            continue
         score = float(weight + semantic[index] + (10 if typed_name and evidence else 0))
         hits.append(SearchHit(company, score, evidence, '키워드 + 의미' if encoder else '키워드'))
-    # 상호에 품목 낱말이 들어간 업소(예: '○○박스' 미용실)는 생산품·업종 일치 후보가 있으면 뺀다.
-    if any(hit.company.id not in name_only for hit in hits):
-        hits = [hit for hit in hits if hit.company.id not in name_only]
     return sorted(hits, key=lambda h: (-h.score, h.company.id))[:request.limit]
