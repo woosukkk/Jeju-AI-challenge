@@ -4,8 +4,8 @@
 
 | 구성 | 사용 범위·상태 | 공식 출처 |
 |---|---|---|
-| OpenAI API | 검색 도구 호출·후보 선택·견적 추출. 기본 모델 ID `gpt-5.4-mini`, 환경 변수로 변경. 실키 미검증 | https://platform.openai.com/docs |
-| Gemini API | 동일 기능, OpenAI 호환 엔드포인트 사용. 기본 ID `gemini-3.8-flash`, 환경 변수로 변경. 실키 미검증 | https://ai.google.dev/gemini-api/docs/openai |
+| OpenAI API | Gemini와 같은 기능. 기본 모델 ID `gpt-5.4-mini`, 환경 변수로 변경. 실키 미검증 | https://platform.openai.com/docs |
+| Gemini API | 검색 Agent(분류 확인·검색·지역 집계 도구)·비교 해설·문의 질문·견적 추출. OpenAI 호환 엔드포인트 사용. 기본 ID `gemini-3.5-flash-lite`, 환경 변수로 변경. 2026-11-17 실키로 5가지 기능 호출 성공(호출당 1.8~6.2초). 같은 날 `gemini-3.8-flash`는 503 수요 과다·35초 시간 초과 반복 | https://ai.google.dev/gemini-api/docs/openai |
 | 국세청 상태조회 | `/api/nts-businessman/v1/status`, 사업자번호로 상태·폐업일 조회. 실키 미검증 | https://www.data.go.kr/data/15081808/openapi.do |
 | multilingual-e5-small | 선택 설치 CPU 로컬 임베딩, query/passages prefix와 코사인 검색. 모델 파일 미탑재·실모델 미검증 | https://huggingface.co/intfloat/multilingual-e5-small |
 

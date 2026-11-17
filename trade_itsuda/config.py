@@ -20,7 +20,9 @@ def settings() -> Settings:
     provider = os.getenv('LLM_PROVIDER', 'openai').strip().lower()
     if provider not in {'openai', 'gemini'}:
         raise ValueError('LLM_PROVIDER는 openai 또는 gemini여야 합니다.')
-    default_model = 'gemini-3.8-flash' if provider == 'gemini' else 'gpt-5.4-mini'
+    # gemini-3.5-flash-lite: 2026-11-17 실호출로 검색 Agent·해설·문의·견적 추출을 확인한 모델.
+    # gemini-3.8-flash는 같은 날 503(수요 과다)과 35초 시간 초과가 반복되어 기본값에서 뺐다.
+    default_model = 'gemini-3.5-flash-lite' if provider == 'gemini' else 'gpt-5.4-mini'
     return Settings(
         database_path=Path(os.getenv('DATABASE_PATH', 'data/trade_itsuda.sqlite3')),
         provider=provider,
