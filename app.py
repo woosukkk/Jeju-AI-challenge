@@ -1,6 +1,6 @@
+from copy import deepcopy
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 from uuid import uuid4
 
 import streamlit as st
@@ -14,9 +14,14 @@ from trade_itsuda.comparison import compare
 from trade_itsuda.config import settings
 from trade_itsuda.exporting import csv_report, html_report, inquiry, rows_for_export
 from trade_itsuda.ingest import demo_companies, import_companies, parse_file
-from trade_itsuda.models import Quote, SearchRequest
+from trade_itsuda.models import Company, Quote, SearchRequest
 from trade_itsuda.popularity import popular, prune_events, record_event
 from trade_itsuda.retrieval import load_encoder, search
+
+STEPS = ['필요 품목', '지역', '후보 고르기', '문의 준비', '견적 입력', '비교 결과']
+JOURNEYS = ['새 거래처 찾기', '기존 거래처와 비교']
+EXISTING = 'existing'
+OTHER = 'other'
 
 st.set_page_config(page_title='거래잇수다', page_icon=':material/handshake:', layout='wide')
 st.title('거래잇수다')
@@ -27,9 +32,18 @@ try:
 except (ValueError, OSError):
     st.error('환경 설정 또는 데이터 폴더를 확인하세요. README의 설치 절차를 참고하세요.')
     st.stop()
+ai_ready = bool(config.llm_key and config.allow_external_data)
 
-for key, value in {'session_id': str(uuid4()), 'shortlist': [], 'hits': [], 'questions': [], 'trace': [], 'summary': '',
-                   'extracted': {}, 'extraction_version': 0, 'flash': ''}.items():
+# 단계 사이에 유지할 값. 위젯 값은 화면을 떠나면 지워지므로 '다음'을 누를 때 여기에 옮겨 둔다.
+FLOW_DEFAULTS = {
+    'step': 1,
+    'need': {'journey': JOURNEYS[0], 'query': '', 'existing': ''},
+    'scope': {'city': '전체', 'region': '전체', 'industry': '전체', 'use_ai': True, 'semantic': False},
+    'hits': [], 'questions': [], 'trace': [], 'summary': '', 'search_note': '', 'searched': False,
+    'shortlist': [], 'conditions': {}, 'drafts': {}, 'inquiry_note': '',
+    'flow_quotes': {}, 'extracted': {}, 'extraction_version': 0, 'advice': None,
+}
+for key, value in {'session_id': str(uuid4()), 'flash': '', **deepcopy(FLOW_DEFAULTS)}.items():
     st.session_state.setdefault(key, value)
 
 
@@ -51,39 +65,71 @@ if st.session_state.flash:
     st.session_state.flash = ''
 if any(c.is_demo for c in records):
     st.warning('가상 데이터로 기능을 체험 중입니다. 실제 기업 정보·대회 필수 데이터 활용 실적이 아닙니다.')
-if not config.llm_key or not config.allow_external_data:
-    st.info('현재 기본 검색·직접 견적 입력 모드입니다. AI 검색·추출에는 API 키와 외부 전송 허용 설정이 필요합니다.')
 with st.sidebar:
-    page = st.radio('메뉴', ['거래처 찾기', '견적 비교', '문의 준비', '최근 관심 업체', '데이터 관리'], key='page')
+    page = st.radio('메뉴', ['거래처 찾기', '최근 관심 업체', '데이터 관리'], key='page')
     st.caption(f'등록 기업 {len(records):,}곳 · 비교 선택 {len(st.session_state.shortlist)}곳')
-    st.caption(f'LLM: {config.provider} / {config.model}')
-    st.caption('국세청 키: ' + ('설정됨' if config.nts_key else '미설정'))
+    st.caption(f'LLM: {config.provider} / {config.model}' + ('' if ai_ready else ' (키 또는 외부 전송 허용 없음)'))
     st.caption('로컬 PC 단일 사용자용입니다. 공용 PC 사용 후 견적을 삭제하세요.')
 
 
-def show_company(c, prefix):
+def go(step: int) -> None:
+    st.session_state.step = step
+    st.rerun()
+
+
+def nav(back: int | None, next_label: str | None, key: str) -> bool:
+    """이전/다음 버튼. 이전은 바로 이동하고, 다음은 눌렸는지만 돌려준다(검증은 호출한 단계에서)."""
+    left, right = st.columns([1, 1])
+    with left:
+        if back is not None and st.button('이전', key=f'{key}_back', icon=':material/arrow_back:'):
+            go(back)
+    with right:
+        return bool(next_label) and st.button(next_label, key=f'{key}_next', type='primary', icon=':material/arrow_forward:')
+
+
+def header(step: int) -> None:
+    st.progress(step / len(STEPS), text=f'{step}/{len(STEPS)} 단계 · {STEPS[step - 1]}')
+    st.caption('  ›  '.join(f'**{i}. {name}**' if i == step else f'{i}. {name}' for i, name in enumerate(STEPS, start=1)))
+
+
+def flow_targets() -> list[tuple[str, str, Company | None]]:
+    """문의·견적 대상: 기존 거래처(있으면 맨 앞) + 담은 후보."""
+    targets: list[tuple[str, str, Company | None]] = []
+    existing = st.session_state.need['existing']
+    if st.session_state.need['journey'] == JOURNEYS[1] and existing:
+        targets.append((EXISTING, existing, None))
+    targets += [(cid, by_id[cid].name, by_id[cid]) for cid in st.session_state.shortlist]
+    return targets
+
+
+def show_company(c: Company, prefix: str) -> None:
     with st.container(border=True):
         st.subheader(c.name)
         st.text(f'{c.industry} · {c.region}')
         st.text('생산품 기록: ' + c.products)
         st.caption(f'출처: {c.source_name} · 데이터 기준일: {c.source_date}')
         st.caption('생산품·주소는 과거 기록입니다. 현재 공급 가능 여부와 연락처는 업체에 확인하세요.')
+        chosen = c.id in st.session_state.shortlist
         with st.container(horizontal=True):
             if st.button('상세 확인', key=f'{prefix}_view_{c.id}'):
                 record_event(config.database_path, c.id, st.session_state.session_id, 'view')
                 st.session_state['detail'] = c.id
-            if st.button('비교에 담기', key=f'{prefix}_add_{c.id}'):
-                if c.id not in st.session_state.shortlist:
-                    if len(st.session_state.shortlist) >= 5:
-                        st.error('후보는 최대 5곳까지 선택할 수 있습니다.')
-                    else:
-                        st.session_state.shortlist.append(c.id)
-                        record_event(config.database_path, c.id, st.session_state.session_id, 'compare')
-                        st.session_state.flash = '비교에 담았습니다. 견적 비교 메뉴에서 견적을 입력하세요.'
-                        st.rerun()
+            if st.button('담기 취소' if chosen else '비교에 담기', key=f'{prefix}_add_{c.id}', type='secondary' if chosen else 'primary'):
+                if chosen:
+                    st.session_state.shortlist.remove(c.id)
+                    st.rerun()
+                elif len(st.session_state.shortlist) >= 5:
+                    st.error('후보는 최대 5곳까지 담을 수 있습니다.')
+                else:
+                    st.session_state.shortlist.append(c.id)
+                    record_event(config.database_path, c.id, st.session_state.session_id, 'compare')
+                    st.rerun()
         if st.session_state.get('detail') == c.id:
             if c.website:
                 st.link_button('등록된 웹사이트 열기', c.website)
+            if not c.business_number:
+                st.caption('이 자료에는 사업자번호가 없어 국세청 사업자 상태를 조회할 수 없습니다.')
+                return
             status = store.read_status(config.database_path, c.id)
             if st.button('국세청 상태 확인', key=f'{prefix}_nts_{c.id}'):
                 with st.spinner('사업자 상태 조회 중'):
@@ -100,216 +146,338 @@ def show_company(c, prefix):
             st.caption('사업자 상태는 품질·신용·납품 능력의 보증이 아닙니다. 성공 결과는 24시간 캐시합니다.')
 
 
-if page == '거래처 찾기':
-    st.subheader('어떤 거래처가 필요한가요?')
-    journey = st.segmented_control('이용 목적', ['새 거래처 찾기', '기존 거래처와 비교'], default='새 거래처 찾기', key='journey')
-    if journey == '기존 거래처와 비교':
-        st.info('후보를 비교에 담은 뒤, 견적 비교에서 기존 업체를 직접 입력하고 기준 견적으로 선택하세요.')
-    if not records:
-        st.info('데이터 관리에서 승인된 기업 데이터를 가져오거나 가상 데모를 불러오세요.')
-    with st.form('search_form'):
-        query = st.text_input('필요한 품목이나 서비스', placeholder='예: 라벨 스티커, 종이 박스, 유리병', key='query', max_chars=2000)
-        left, right = st.columns(2)
-        with left:
-            region = st.selectbox('지역', ['전체'] + sorted({c.region for c in records}), key='region')
-        with right:
-            industry = st.selectbox('업종', ['전체'] + sorted({c.industry for c in records}), key='industry')
-        use_ai = st.checkbox('AI가 검색 도구를 호출해 후보를 골라주기', disabled=not (config.llm_key and config.allow_external_data), key='use_ai')
-        semantic = st.checkbox('로컬 의미 검색 함께 사용', key='semantic', help='선택 설치 및 models/e5 모델 준비가 필요합니다. 자동 다운로드하지 않습니다.')
-        submitted = st.form_submit_button('거래처 찾기', type='primary', key='search_submit')
-    if submitted:
-        st.session_state.hits, st.session_state.questions, st.session_state.trace, st.session_state.summary = [], [], [], ''
+def run_search() -> None:
+    need, scope = st.session_state.need, st.session_state.scope
+    region = scope['region'] if scope['region'] != '전체' else ('' if scope['city'] == '전체' else scope['city'])
+    request = SearchRequest(query=need['query'], region=region, industry='' if scope['industry'] == '전체' else scope['industry'])
+    state = st.session_state
+    state.hits, state.questions, state.trace, state.summary, state.search_note = [], [], [], '', ''
+    encoder = encoder_at('models/e5') if scope['semantic'] else None
+    if scope['use_ai'] and ai_ready:
         try:
-            request = SearchRequest(query=query, region='' if region == '전체' else region, industry='' if industry == '전체' else industry)
-            with st.spinner('근거를 확인하며 검색 중'):
-                encoder = encoder_at('models/e5') if semantic else None
-                if use_ai:
-                    result = run_agent(config, records, request, encoder)
-                    st.session_state.hits, st.session_state.questions, st.session_state.trace = result.hits, result.questions, result.trace
-                    st.session_state.summary = result.summary
-                else:
-                    st.session_state.hits = search(records, request, encoder)
-            st.session_state['searched'] = True
+            result = run_agent(config, records, request, encoder)
+            state.hits, state.questions, state.trace, state.summary = result.hits, result.questions, result.trace, result.summary
         except AgentError as error:
-            st.error(str(error))
+            # AI가 실패해도 도민이 멈추지 않도록 키워드 검색 결과로 이어간다.
+            state.search_note = f'{error} 키워드 검색 결과를 대신 보여줍니다.'
+            state.hits = search(records, request, encoder)
+    else:
+        state.hits = search(records, request, encoder)
+    state.searched = True
+
+
+def step_need() -> None:
+    need = st.session_state.need
+    st.subheader('어떤 거래처가 필요한가요?')
+    journey = st.radio('이용 목적', JOURNEYS, index=JOURNEYS.index(need['journey']), horizontal=True, key='w_journey')
+    query = st.text_input('필요한 품목이나 서비스를 편하게 적어 주세요', value=need['query'], max_chars=200, key='w_query',
+                          placeholder='예: 가게 간판을 새로 달고 싶어요 / 택배 박스가 필요해요')
+    existing = ''
+    if journey == JOURNEYS[1]:
+        existing = st.text_input('지금 거래하는 업체 이름', value=need['existing'], max_chars=200, key='w_existing',
+                                 help='검색 데이터에 없어도 됩니다. 5단계에서 이 업체의 견적을 비교 기준으로 씁니다.')
+    if not records:
+        st.info('먼저 왼쪽 메뉴의 데이터 관리에서 기업 데이터를 가져오세요.')
+    if nav(None, '다음: 지역 고르기', 'n1'):
+        if not query.strip():
+            st.error('필요한 품목이나 서비스를 적어 주세요.')
+        elif journey == JOURNEYS[1] and not existing.strip():
+            st.error('비교할 기존 거래처 이름을 적어 주세요.')
+        else:
+            st.session_state.need = {'journey': journey, 'query': query.strip(), 'existing': existing.strip()}
+            go(2)
+
+
+def step_scope() -> None:
+    scope = st.session_state.scope
+    st.subheader('어느 지역에서 찾을까요?')
+    st.caption(f"찾는 품목: {st.session_state.need['query']}")
+    cities = ['전체'] + sorted({c.region.split()[0] for c in records if c.region.strip()})
+    city = st.radio('시', cities, index=cities.index(scope['city']) if scope['city'] in cities else 0, horizontal=True, key='w_city')
+    regions = ['전체'] + sorted({c.region for c in records if city == '전체' or c.region.split()[0] == city})
+    region = st.selectbox('읍·면·동 (모르면 전체)', regions, key='w_region',
+                          index=regions.index(scope['region']) if scope['region'] in regions else 0)
+    use_ai = st.toggle('AI Agent가 업종 분류와 지역 분포를 확인하며 찾기', value=scope['use_ai'] and ai_ready,
+                       disabled=not ai_ready, key='w_ai')
+    if not ai_ready:
+        st.caption('AI Agent를 쓰려면 API 키와 외부 전송 허용 설정이 필요합니다. 지금은 키워드 검색으로 찾습니다.')
+    with st.expander('업종을 알고 있다면 (선택)'):
+        industries = ['전체'] + sorted({c.industry for c in records})
+        industry = st.selectbox('업종', industries, key='w_industry',
+                                index=industries.index(scope['industry']) if scope['industry'] in industries else 0)
+        semantic = st.checkbox('로컬 의미 검색 함께 사용', value=scope['semantic'], key='w_semantic',
+                               help='선택 설치 및 models/e5 모델 준비가 필요합니다. 자동 다운로드하지 않습니다.')
+    if nav(1, '후보 찾기', 'n2'):
+        st.session_state.scope = {'city': city, 'region': region, 'industry': industry, 'use_ai': use_ai, 'semantic': semantic}
+        try:
+            with st.spinner('근거를 확인하며 찾는 중'):
+                run_search()
+            go(3)
         except (ValueError, OSError):
-            st.error('검색 조건 또는 로컬 모델을 확인하세요. 품목을 입력하고 기본 검색부터 시도할 수 있습니다.')
-    if st.session_state.summary:
-        st.info('AI 탐색 요약: ' + st.session_state.summary)
+            st.error('검색 조건 또는 로컬 모델을 확인하세요. 의미 검색을 끄고 다시 시도할 수 있습니다.')
+
+
+def step_candidates() -> None:
+    state = st.session_state
+    scope = state.scope
+    place = scope['region'] if scope['region'] != '전체' else scope['city']
+    st.subheader('비교할 후보를 고르세요')
+    st.caption(f"'{state.need['query']}' · 지역 {place} · 최대 5곳까지 담을 수 있습니다.")
+    if state.search_note:
+        st.warning(state.search_note)
+    if state.summary:
+        st.info('AI 탐색 요약: ' + state.summary)
         st.caption('요약의 숫자는 Agent 도구가 이 PC의 데이터에서 센 값만 허용합니다. 판단은 아래 근거와 함께 확인하세요.')
-    for question in st.session_state.questions:
+    for question in state.questions:
         st.text('추가로 확인할 점: ' + question)
-    if st.session_state.trace:
-        with st.container(border=True):
-            st.caption('Agent가 수행한 단계')
-            for number, line in enumerate(trace_lines(st.session_state.trace), start=1):
+    if state.trace:
+        with st.expander('Agent가 수행한 단계', expanded=True):
+            for number, line in enumerate(trace_lines(state.trace), start=1):
                 st.text(f'{number}. {line}')
-            with st.expander('도구 호출 원본 기록'):
-                st.json(st.session_state.trace)
-    if st.session_state.get('searched') and not st.session_state.hits:
-        st.info('조건에 맞는 근거를 찾지 못했습니다. 품목을 짧게 입력하거나 지역·업종 조건을 넓혀보세요.')
-    for hit in st.session_state.hits:
+            st.json(state.trace, expanded=False)
+    if state.searched and not state.hits:
+        st.info('조건에 맞는 근거를 찾지 못했습니다. 이전 단계에서 지역을 넓히거나, 첫 단계에서 품목을 짧게 적어 보세요.')
+    for hit in state.hits:
         if hit.company.id in by_id:
             st.caption(hit.method + ' · ' + ' / '.join(hit.reasons))
             show_company(by_id[hit.company.id], 'search')
+    names = [by_id[cid].name for cid in state.shortlist]
+    st.caption('담은 후보: ' + (', '.join(names) if names else '아직 없음'))
+    if nav(2, '다음: 문의 준비', 'n3'):
+        if not state.shortlist:
+            st.error('비교할 후보를 1곳 이상 담아 주세요.')
+        else:
+            go(4)
 
-elif page == '견적 비교':
-    st.subheader('기존 업체와 후보의 견적을 같은 조건으로 비교하세요')
-    st.caption('빈 금액은 미확인입니다. 무료로 확인된 항목만 0을 입력하세요. 배송비·추가 비용은 세금 포함 최종 금액입니다.')
-    if st.session_state.shortlist:
-        selected = st.multiselect('비교 후보 목록', st.session_state.shortlist, default=st.session_state.shortlist,
-                                  format_func=lambda cid: by_id[cid].name, key='shortlist_editor')
-        if st.button('후보 목록 적용', key='apply_shortlist'):
-            st.session_state.shortlist = [cid for cid in selected if cid in by_id][:5]
+
+def step_inquiry() -> None:
+    state = st.session_state
+    cond = state.conditions
+    targets = flow_targets()
+    st.subheader('견적 요청 조건을 한 번만 적으세요')
+    st.caption('적은 조건으로 업체마다 같은 양식의 문의 초안을 만들고, 다음 단계 견적 입력 칸에도 그대로 채웁니다. 자동 발송하지 않습니다.')
+    st.caption('문의 대상: ' + ', '.join(name for _, name, _ in targets))
+    with st.form('conditions_form'):
+        item = st.text_input('품목 (업체에 보낼 짧은 이름)', value=cond.get('item', ''), key='w_item',
+                             placeholder=f"예: LED 간판 · 처음 적은 내용: {state.need['query']}")
+        left, middle, right = st.columns(3)
+        spec = left.text_input('규격', value=cond.get('specification', ''), key='w_spec', placeholder='예: 1200x600 LED')
+        quantity = middle.text_input('수량', value=cond.get('quantity', ''), key='w_quantity', placeholder='예: 500')
+        unit = right.text_input('단위', value=cond.get('unit', '개'), key='w_unit')
+        notes = st.text_area('추가 요청 (희망 납기, 설치·배송 여부 등)', value=cond.get('notes', ''), key='w_notes')
+        use_ai = st.checkbox('AI가 업체의 등록 업종·생산품을 보고 확인 질문을 덧붙이기', value=ai_ready, disabled=not ai_ready, key='w_inquiry_ai')
+        create = st.form_submit_button('조건 저장하고 문의 초안 만들기', type='primary', key='create_inquiry')
+    if create:
+        try:
+            if Decimal(quantity) <= 0 or not Decimal(quantity).is_finite():
+                raise ValueError()
+            drafts, note = {}, ''
+            for key, name, company in targets:
+                questions: list[str] = []
+                if use_ai:
+                    try:
+                        with st.spinner(f'{name} 확인 질문을 만드는 중'):
+                            questions = inquiry_questions(config, {'item': item, 'specification': spec, 'quantity': quantity,
+                                                                   'unit': unit, 'notes': notes}, company)
+                    except AgentError as error:
+                        note = f'{error} 일부 초안은 고정 양식으로 만들었습니다.'
+                drafts[key] = inquiry(name, item, spec, quantity, unit, notes, questions)
+            state.conditions = {'item': item, 'specification': spec, 'quantity': quantity, 'unit': unit, 'notes': notes}
+            state.drafts, state.inquiry_note = drafts, note
             st.rerun()
-    with st.expander('AI로 견적 텍스트·PDF에서 입력값 추출'):
-        st.caption('연락처·개인정보를 제거하고 외부 전송 가능한 자료만 사용하세요. 추출값은 반드시 원문과 대조하세요.')
+        except (ValueError, ArithmeticError):
+            st.error('품목·규격·단위와 0보다 큰 수량을 입력하세요.')
+    if state.inquiry_note:
+        st.warning(state.inquiry_note)
+    drafts = {key: text for key, text in state.drafts.items() if key in {t[0] for t in targets}}
+    if drafts:
+        names = {key: name for key, name, _ in targets}
+        for tab, (key, text) in zip(st.tabs([names[key] for key in drafts]), drafts.items()):
+            with tab:
+                st.text(text)
+                st.download_button('이 초안 다운로드', text, f'거래잇수다_문의_{names[key]}.txt', 'text/plain', key=f'download_inquiry_{key}')
+        st.download_button('초안 모두 한 파일로 받기', '\n\n----------\n\n'.join(drafts.values()), '거래잇수다_문의_전체.txt',
+                           'text/plain', key='download_inquiry_all')
+    if nav(3, '다음: 받은 견적 입력', 'n4'):
+        if not state.conditions:
+            st.error('요청 조건을 먼저 저장하세요. 다음 단계 견적 입력에 같은 조건을 채웁니다.')
+        else:
+            go(5)
+
+
+def quote_form(target: str, name: str, saved_by_id: dict[str, Quote]) -> None:
+    state = st.session_state
+    existing_id = state.flow_quotes.get(target)
+    extracted = state.extracted.get('values', {}) if state.extracted.get('target') == target else {}
+    if extracted:
+        seed = {**state.conditions, **extracted}
+    elif existing_id in saved_by_id:
+        seed = saved_by_id[existing_id].model_dump(mode='json')
+    else:
+        seed = dict(state.conditions)
+    prefix = f'q_{target}_{state.extraction_version}_{existing_id or "new"}'
+
+    def field(container, label: str, name: str, default: str = ''):
+        value = seed.get(name)
+        return container.text_input(label, value=str(default if value is None else value), key=f'{prefix}_{name}')
+
+    with st.form(f'quote_form_{target}'):
+        company_name = field(st, '업체명', 'company_name', name) if target == OTHER else name
+        st.markdown('**① 요청 조건** · 4단계 조건을 채웠습니다. 견적서와 다르면 고치세요.')
+        a, b, c, d = st.columns([2, 2, 1, 1])
+        item = field(a, '품목', 'item')
+        specification = field(b, '규격', 'specification')
+        quantity = field(c, '수량', 'quantity')
+        unit = field(d, '단위', 'unit')
+        st.markdown('**② 금액** · 모르는 금액은 빈칸(미확인), 무료로 확인된 항목만 0')
+        a, b, c = st.columns(3)
+        unit_price = field(a, '단가', 'unit_price')
+        tax_options = ['미확인', '포함', '별도']
+        tax = b.selectbox('단가에 부가세 포함?', tax_options, key=f'{prefix}_tax',
+                          index=tax_options.index({None: '미확인', True: '포함', False: '별도'}[seed.get('tax_included')]))
+        tax_rate = c.text_input('별도 세율 (%)', key=f'{prefix}_rate',
+                                value=str(Decimal(str(seed['tax_rate'])) * 100) if seed.get('tax_rate') is not None else '')
+        a, b, c = st.columns(3)
+        shipping = field(a, '배송비 (세금 포함)', 'shipping')
+        extra_cost = field(b, '추가 비용 (세금 포함)', 'extra_cost')
+        currency = field(c, '통화', 'currency', 'KRW')
+        st.markdown('**③ 거래 조건과 근거**')
+        a, b, c, d = st.columns(4)
+        minimum_order = field(a, '최소 주문 수량', 'minimum_order')
+        lead_days = field(b, '납기 (일)', 'lead_days')
+        issued_at = field(c, '견적 발행일 (YYYY-MM-DD)', 'issued_at')
+        valid_until = field(d, '유효기간 (YYYY-MM-DD)', 'valid_until')
+        source_name = field(st, '견적 근거 (견적서 파일명·담당자 회신일 등)', 'source_name', '사용자 입력')
+        confirmed = st.checkbox('견적서 원문과 대조해 입력값을 확인했습니다', value=bool(seed.get('confirmed', False)), key=f'{prefix}_confirmed')
+        save = st.form_submit_button('이 업체 견적 저장', type='primary', key='save_quote')
+    if save:
+        try:
+            qid = existing_id if existing_id in saved_by_id else str(uuid4())
+            quote = Quote(id=qid, company_id=target if target in by_id else f'manual-{qid}', company_name=company_name,
+                          item=item, specification=specification, unit=unit, quantity=quantity, unit_price=unit_price or None,
+                          currency=currency, tax_included={'미확인': None, '포함': True, '별도': False}[tax],
+                          tax_rate=Decimal(tax_rate) / 100 if tax_rate else None, shipping=shipping or None,
+                          extra_cost=extra_cost or None, minimum_order=minimum_order or None, lead_days=lead_days or None,
+                          issued_at=issued_at or None, valid_until=valid_until or None, source_name=source_name, confirmed=confirmed)
+            store.save_quotes(config.database_path, [quote])
+            # '다른 업체'는 저장할 때마다 새 견적이 되도록 대상 키를 견적 ID로 바꿔 둔다.
+            state.flow_quotes[target if target != OTHER else f'{OTHER}-{qid}'] = qid
+            state.extracted = {}
+            state.flash = f'{company_name} 견적을 저장했습니다.'
+            st.rerun()
+        except (ValueError, ArithmeticError, KeyError):
+            st.error('입력값을 확인하세요. 필수 항목·숫자·통화 코드·날짜 순서가 올바르지 않습니다.')
+
+
+def step_quotes() -> None:
+    state = st.session_state
+    saved_by_id = {q.id: q for q in store.quotes(config.database_path)}
+    state.flow_quotes = {k: v for k, v in state.flow_quotes.items() if v in saved_by_id}
+    targets = flow_targets()
+    names = {key: name for key, name, _ in targets}
+    for key, qid in state.flow_quotes.items():
+        names.setdefault(key, saved_by_id[qid].company_name)
+    st.subheader('받은 견적을 업체별로 입력하세요')
+    st.caption('업체를 하나씩 골라 견적을 저장합니다. 조건이 같아야 다음 단계에서 차액을 계산할 수 있습니다.')
+    # 화면에 보이는 이름을 그대로 선택지로 쓴다(이름이 같으면 번호를 붙여 구분). 입력 여부는 아래 캡션에 따로 보여 준다.
+    labels: dict[str, str] = {}
+    for key in [*names, OTHER]:
+        label = '+ 다른 업체' if key == OTHER else names[key]
+        while label in labels:
+            label += ' (2)'
+        labels[label] = key
+    chosen = st.radio('견적 업체', list(labels), horizontal=True, key='w_quote_target')
+    target = labels.get(chosen or '', next(iter(labels.values())))
+    if target == EXISTING:
+        st.caption('기존 거래처 견적은 6단계에서 비교 기준이 됩니다.')
+    with st.expander('견적서 텍스트·PDF가 있으면 AI가 칸을 채워 드려요'):
+        st.caption('연락처·개인정보를 지우고 외부 전송 가능한 자료만 사용하세요. 채운 값은 반드시 원문과 대조하세요.')
         with st.form('extract_form'):
             upload = st.file_uploader('견적 파일 (선택)', type=['txt', 'pdf'], key='quote_file')
             text = st.text_area('또는 견적 원문 붙여넣기', key='quote_text', max_chars=20000)
-            extract = st.form_submit_button('AI 추출 후 입력 양식에 채우기', key='extract_submit', disabled=not (config.llm_key and config.allow_external_data))
+            extract = st.form_submit_button('AI로 칸 채우기', key='extract_submit', disabled=not ai_ready)
         if extract:
             try:
                 raw = quote_text(upload.getvalue(), upload.name) if upload else text
                 with st.spinner('견적 추출 중'):
                     draft = extract_quote(config, raw)
-                st.session_state.extracted = draft.model_dump(mode='json', exclude_none=True)
-                st.session_state.extraction_version += 1
-                st.session_state['edit_quote'] = 'new'
-                st.session_state.flash = '추출값을 채웠습니다. 원문과 대조하고 빠진 조건을 입력하세요.'
+                state.extracted = {'target': target, 'values': draft.model_dump(mode='json', exclude_none=True)}
+                state.extraction_version += 1
+                state.flash = '추출값을 채웠습니다. 원문과 대조하고 빠진 조건을 입력하세요.'
                 st.rerun()
             except AgentError as error:
                 st.error(str(error))
-    saved = store.quotes(config.database_path)
-    saved_by_id = {q.id: q for q in saved}
-    edit_id = st.selectbox('작성·수정할 견적', ['new'] + list(saved_by_id),
-                           format_func=lambda qid: '새 견적' if qid == 'new' else saved_by_id[qid].company_name + ' / ' + saved_by_id[qid].item,
-                           key='edit_quote')
-    seed = saved_by_id[edit_id].model_dump(mode='json') if edit_id in saved_by_id else st.session_state.extracted
-    prefix = f'q_{edit_id}_{st.session_state.extraction_version}'
-    candidates = list(st.session_state.shortlist)
-    seed_company = seed.get('company_id')
-    if seed_company in by_id and seed_company not in candidates:
-        candidates.append(seed_company)
-    company_options = ['manual'] + candidates
-    target = st.selectbox('견적 업체', company_options, index=company_options.index(seed_company) if seed_company in company_options else 0,
-                          format_func=lambda cid: '기존 업체 등 직접 입력' if cid == 'manual' else by_id[cid].name, key=prefix + '_target')
-    with st.form('quote_form'):
-        def field(label, name, default=''):
-            value = seed.get(name)
-            return st.text_input(label, value=str(default if value is None else value), key=prefix + '_' + name)
-        company_name = field('업체명 (직접 입력할 때)', 'company_name')
-        item = field('품목', 'item')
-        specification = field('규격 (예: 가로 50mm × 세로 50mm / 무광)', 'specification')
-        quantity = field('수량', 'quantity')
-        unit = field('단위 (예: 개)', 'unit')
-        unit_price = field('단가 (미확인이면 빈칸)', 'unit_price')
-        currency = field('통화 코드', 'currency', 'KRW')
-        tax_options = ['미확인', '포함', '별도']
-        tax_seed = {None: '미확인', True: '포함', False: '별도'}[seed.get('tax_included')]
-        tax = st.selectbox('단가의 세금 포함 여부', tax_options, index=tax_options.index(tax_seed), key=prefix + '_tax')
-        tax_rate = st.text_input('별도 세율 (%)', value=str(Decimal(str(seed['tax_rate'])) * 100) if seed.get('tax_rate') is not None else '', key=prefix + '_rate')
-        shipping = field('배송비 (세금 포함, 무료이면 0)', 'shipping')
-        extra_cost = field('추가 비용 (세금 포함, 없으면 0)', 'extra_cost')
-        minimum_order = field('최소 주문 수량 (미확인이면 빈칸)', 'minimum_order')
-        lead_days = field('납기 (일, 미확인이면 빈칸)', 'lead_days')
-        issued_at = field('견적 발행일 (YYYY-MM-DD, 미확인이면 빈칸)', 'issued_at')
-        valid_until = field('견적 유효기간 (YYYY-MM-DD, 미확인이면 빈칸)', 'valid_until')
-        source_name = field('견적 근거 (예: 업체 견적서 파일명·담당자 회신일)', 'source_name', '사용자 입력')
-        confirmed = st.checkbox('원문과 대조해 입력값을 확인했습니다', value=bool(seed.get('confirmed', False)), key=prefix + '_confirmed')
-        save = st.form_submit_button('견적 저장', type='primary', key='save_quote')
-    if save:
-        try:
-            if target not in company_options:
-                raise ValueError()
-            qid = edit_id if edit_id in saved_by_id else str(uuid4())
-            quote = Quote(id=qid, company_id=target if target != 'manual' else 'manual-' + qid,
-                          company_name=by_id[target].name if target in by_id else company_name, item=item, specification=specification,
-                          unit=unit, quantity=quantity, unit_price=unit_price or None, currency=currency,
-                          tax_included={'미확인': None, '포함': True, '별도': False}[tax],
-                          tax_rate=Decimal(tax_rate) / 100 if tax_rate else None, shipping=shipping or None,
-                          extra_cost=extra_cost or None, minimum_order=minimum_order or None, lead_days=lead_days or None,
-                          issued_at=issued_at or None, valid_until=valid_until or None, source_name=source_name, confirmed=confirmed)
-            store.save_quotes(config.database_path, [quote])
-            st.session_state.flash = '견적을 저장했습니다. 아래에서 기준 견적을 선택하세요.'
-            st.rerun()
-        except (ValueError, ArithmeticError, KeyError):
-            st.error('입력값을 확인하세요. 필수 항목·숫자·통화 코드·날짜 순서가 올바르지 않습니다.')
-    if saved:
-        st.divider()
-        selected_ids = st.multiselect('비교할 견적 (최대 6개)', list(saved_by_id), default=list(saved_by_id)[:6],
-                                      format_func=lambda qid: saved_by_id[qid].company_name + ' / ' + saved_by_id[qid].item, key='compare_ids')
-        if selected_ids and len(selected_ids) <= 6 and all(qid in saved_by_id for qid in selected_ids):
-            baseline_id = st.selectbox('기준 견적 (기존 거래 업체 등)', selected_ids,
-                                       format_func=lambda qid: saved_by_id[qid].company_name, key='baseline_id')
-            rows = compare([saved_by_id[qid] for qid in selected_ids], baseline_id)
-            st.dataframe(rows_for_export(rows), hide_index=True, alt='견적 총액과 비교 제한 조건')
-            st.caption('차액 = 후보 총액 − 기준 총액. 조건이 다르거나 비용이 미확인인 견적은 차액 비교에서 제외합니다.')
-            with st.container(horizontal=True):
-                st.download_button('비교 보고서 (HTML)', html_report(rows, baseline_id, records), '거래잇수다_비교.html', 'text/html', key='download_html')
-                st.download_button('비교표 (CSV)', csv_report(rows), '거래잇수다_비교.csv', 'text/csv', key='download_csv')
-            table = rows_for_export(rows)
-            # 견적 내용이나 기준이 바뀌면 이전 해설을 보여주지 않는다.
-            advice_key = repr((table, baseline_id))
-            if st.button('AI 비교 해설 받기', key='explain_compare', disabled=not (config.llm_key and config.allow_external_data)):
-                try:
-                    with st.spinner('비교표를 해설하는 중'):
-                        st.session_state['advice'] = (advice_key, explain_comparison(config, table, saved_by_id[baseline_id].company_name))
-                except AgentError as error:
-                    st.error(str(error))
-            advice = st.session_state.get('advice')
-            if advice and advice[0] == advice_key:
-                result = advice[1]
-                with st.container(border=True):
-                    st.caption('AI 비교 해설 · 숫자는 위 비교표 값만 허용합니다. 결정은 업체 확인 후 직접 하세요.')
-                    st.text(result.summary)
-                    for check in result.checks:
-                        st.text('확인할 점: ' + check)
-                    for label, text in [('유지', result.keep), ('병행', result.parallel), ('전환', result.switch)]:
-                        if text:
-                            st.text(f'{label} 검토 조건: {text}')
-        elif len(selected_ids) > 6:
-            st.error('견적은 최대 6개를 선택하세요.')
-        delete_id = st.selectbox('삭제할 견적', list(saved_by_id), format_func=lambda qid: saved_by_id[qid].company_name, key='delete_quote_id')
-        if st.button('선택 견적 삭제', key='delete_quote') and delete_id in saved_by_id:
-            store.delete_quote(config.database_path, delete_id)
-            st.session_state.flash = '선택 견적을 삭제했습니다.'
-            st.rerun()
+    quote_form(target, names.get(target, ''), saved_by_id)
+    if target in state.flow_quotes and st.button('이 업체 견적 삭제', key='delete_quote'):
+        store.delete_quote(config.database_path, state.flow_quotes.pop(target))
+        state.flash = '견적을 삭제했습니다.'
+        st.rerun()
+    done = [names[k] for k in state.flow_quotes]
+    st.caption('입력한 견적: ' + (', '.join(done) if done else '아직 없음'))
+    if nav(4, '다음: 비교 결과 보기', 'n5'):
+        if not state.flow_quotes:
+            st.error('견적을 1개 이상 저장하세요.')
+        else:
+            go(6)
 
-elif page == '문의 준비':
-    st.subheader('동일한 조건으로 견적을 요청하세요')
-    st.caption('직접 발송할 수 있는 문의 초안을 만듭니다. 자동 발송하지 않습니다.')
-    candidates = [by_id[cid].name for cid in st.session_state.shortlist]
-    with st.form('inquiry_form'):
-        name = st.text_input('문의할 업체명', value=candidates[0] if candidates else '', key='inquiry_company')
-        item = st.text_input('요청 품목', key='inquiry_item')
-        spec = st.text_input('요청 규격', key='inquiry_spec')
-        quantity = st.text_input('요청 수량', key='inquiry_quantity')
-        unit = st.text_input('요청 단위', key='inquiry_unit')
-        notes = st.text_area('추가 요청', key='inquiry_notes')
-        use_ai_questions = st.checkbox('AI가 이 업체의 등록 업종·생산품에 맞는 확인 질문 추가', key='inquiry_ai',
-                                       disabled=not (config.llm_key and config.allow_external_data))
-        create = st.form_submit_button('문의 초안 만들기', key='create_inquiry')
-    if create:
-        try:
-            if Decimal(quantity) <= 0 or not Decimal(quantity).is_finite():
-                raise ValueError()
-            draft = inquiry(name, item, spec, quantity, unit, notes)
-            if use_ai_questions:
-                # 비교에 담은 업체면 등록 기록을 함께 보내고, 직접 입력한 업체는 요청 조건만 보낸다.
-                company = next((by_id[cid] for cid in st.session_state.shortlist if by_id[cid].name == name.strip()), None)
-                with st.spinner('업체별 확인 질문을 만드는 중'):
-                    questions = inquiry_questions(config, {'item': item, 'specification': spec, 'quantity': quantity,
-                                                           'unit': unit, 'notes': notes}, company)
-                draft = inquiry(name, item, spec, quantity, unit, notes, questions)
-            st.session_state['inquiry_draft'] = draft
-        except AgentError as error:
-            st.error(str(error))
-        except (ValueError, ArithmeticError):
-            st.error('필수 항목과 양수 수량을 입력하세요.')
-    if st.session_state.get('inquiry_draft'):
-        st.text(st.session_state.inquiry_draft)
-        st.download_button('문의 초안 다운로드', st.session_state.inquiry_draft, '거래잇수다_문의.txt', 'text/plain', key='download_inquiry')
+
+def step_result() -> None:
+    state = st.session_state
+    saved_by_id = {q.id: q for q in store.quotes(config.database_path)}
+    flow_ids = [qid for qid in state.flow_quotes.values() if qid in saved_by_id]
+    st.subheader('같은 조건으로 비교한 결과')
+    st.caption('빈 금액은 미확인입니다. 품목·규격·단위·수량·통화가 같고 비용이 모두 확인된 견적만 차액을 계산합니다.')
+    others = [qid for qid in saved_by_id if qid not in flow_ids]
+    extra: list[str] = []
+    if others:
+        with st.expander('이전에 저장한 견적도 함께 비교하기'):
+            extra = st.multiselect('추가할 견적', others, key='w_extra_quotes',
+                                   format_func=lambda qid: saved_by_id[qid].company_name + ' / ' + saved_by_id[qid].item)
+    selected = flow_ids + extra
+    if not selected:
+        st.info('비교할 견적이 없습니다. 이전 단계에서 견적을 저장하세요.')
+    elif len(selected) > 6:
+        st.error('견적은 최대 6개까지 비교할 수 있습니다.')
+    else:
+        default = state.flow_quotes.get(EXISTING, selected[0])
+        baseline_id = st.selectbox('비교 기준 견적', selected, index=selected.index(default) if default in selected else 0,
+                                   format_func=lambda qid: saved_by_id[qid].company_name, key='baseline_id')
+        rows = compare([saved_by_id[qid] for qid in selected], baseline_id)
+        table = rows_for_export(rows)
+        st.dataframe(table, hide_index=True, alt='견적 총액과 비교 제한 조건')
+        st.caption('차액 = 후보 총액 − 기준 총액. 조건이 다르거나 비용이 미확인인 견적은 차액 비교에서 제외합니다.')
+        with st.container(horizontal=True):
+            st.download_button('비교 보고서 (HTML)', html_report(rows, baseline_id, records), '거래잇수다_비교.html', 'text/html', key='download_html')
+            st.download_button('비교표 (CSV)', csv_report(rows), '거래잇수다_비교.csv', 'text/csv', key='download_csv')
+        # 견적 내용이나 기준이 바뀌면 이전 해설을 보여주지 않는다.
+        advice_key = repr((table, baseline_id))
+        if st.button('AI 비교 해설 받기', key='explain_compare', disabled=not ai_ready):
+            try:
+                with st.spinner('비교표를 해설하는 중'):
+                    state.advice = (advice_key, explain_comparison(config, table, saved_by_id[baseline_id].company_name))
+            except AgentError as error:
+                st.error(str(error))
+        if state.advice and state.advice[0] == advice_key:
+            result = state.advice[1]
+            with st.container(border=True):
+                st.caption('AI 비교 해설 · 숫자는 위 비교표 값만 허용합니다. 결정은 업체 확인 후 직접 하세요.')
+                st.text(result.summary)
+                for check in result.checks:
+                    st.text('확인할 점: ' + check)
+                for label, text in [('유지', result.keep), ('병행', result.parallel), ('전환', result.switch)]:
+                    if text:
+                        st.text(f'{label} 검토 조건: {text}')
+    nav(5, None, 'n6')
+    if st.button('처음부터 새로 찾기', key='restart', icon=':material/restart_alt:'):
+        for key, value in deepcopy(FLOW_DEFAULTS).items():
+            st.session_state[key] = value
+        go(1)
+
+
+if page == '거래처 찾기':
+    current = st.session_state.step
+    header(current)
+    {1: step_need, 2: step_scope, 3: step_candidates, 4: step_inquiry, 5: step_quotes, 6: step_result}[current]()
 
 elif page == '최근 관심 업체':
     st.subheader('최근 30일, 이용자가 관심을 보인 업체')
@@ -322,11 +490,11 @@ elif page == '최근 관심 업체':
         st.info('아직 집계된 관심 기록이 없습니다. 가상 수치를 채우지 않습니다.')
     for rank in rankings:
         c = by_id[rank['company_id']]
-        if config.nts_key and config.allow_external_data:
+        if config.nts_key and config.allow_external_data and c.business_number:
             refresh_status(config.database_path, c, config)
         st.caption(f'관심 {rank["interest_count"]}회 · 상세 보기 {rank["views"]}회 · 비교 선택 {rank["comparisons"]}회')
         show_company(c, 'popular')
-    st.caption('이 화면을 여는 동안 상위 5개 업체의 사업자 상태만 캐시 주기에 따라 갱신합니다. 앱이 꺼져 있을 때나 생산품 정보는 자동 갱신하지 않습니다.')
+    st.caption('사업자번호가 있는 업체만 이 화면을 여는 동안 캐시 주기에 따라 국세청 상태를 갱신합니다. 앱이 꺼져 있을 때나 생산품 정보는 자동 갱신하지 않습니다.')
 
 elif page == '데이터 관리':
     st.subheader('기업 데이터 가져오기')
