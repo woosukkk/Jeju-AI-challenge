@@ -23,10 +23,51 @@ JOURNEYS = ['새 거래처 찾기', '기존 거래처와 비교']
 EXISTING = 'existing'
 OTHER = 'other'
 
-st.set_page_config(page_title='거래잇수다', page_icon=':material/handshake:', layout='wide')
+st.set_page_config(page_title='거래잇수다', page_icon=':material/handshake:', layout='centered',
+                   initial_sidebar_state='collapsed')
 # KRDS(범정부 디자인 시스템) 표준형 색상: primary-50 #256ef4, primary-5 #ecf2fe, gray-20 #cdd1d5, gray-50 #6d7882.
-# 테마 색·글꼴은 .streamlit/config.toml, 여기서는 기본 위젯에 없는 단계 표시기와 목적 카드 모양만 정한다.
+# 테마 색·글꼴은 .streamlit/config.toml, 여기서는 앱 틀(상단 앱 바·화면 카드·하단 버튼 바)과
+# 기본 위젯에 없는 단계 표시기·목적 카드 모양을 정한다.
 st.html('''<style>
+/* 앱 틀: Streamlit 기본 머리줄·메뉴·사이드바를 숨기고, 회색 바탕 위 가운데 흰 화면 카드로 보이게 한다. */
+[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stSidebar"],
+[data-testid="stSidebarCollapsedControl"], footer { display: none !important; }
+.stApp { background: #f4f5f6; }
+[data-testid="stMainBlockContainer"] { max-width: 960px; padding: 0 16px 48px; }
+/* Streamlit은 컨테이너를 stLayoutWrapper로 한 번 더 감싸므로 고정(sticky)은 그 바깥 틀에 건다. */
+[data-testid="stLayoutWrapper"]:has(> .st-key-appbar) { position: sticky; top: 0; z-index: 50; }
+[data-testid="stLayoutWrapper"]:has(> [class*="st-key-navbar_"]) { position: sticky; bottom: 0; z-index: 40; }
+.st-key-appbar { background: #fff; padding: 10px 0; margin-bottom: 20px;
+  box-shadow: 0 0 0 100vmax #fff, 0 1px 0 100vmax #e6e8ea; clip-path: inset(0 -100vmax -1px -100vmax); }
+.tis-brand { display: flex; align-items: center; gap: 10px; }
+.tis-logo { width: 36px; height: 36px; border-radius: 10px; background: #256ef4; color: #fff; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; font-size: 1.05rem; }
+.tis-brand strong { display: block; font-size: 1.1rem; color: #1e2124; line-height: 1.2; }
+.tis-brand small { display: block; font-size: 0.75rem; color: #6d7882; }
+.tis-status { text-align: right; font-size: 0.78rem; color: #6d7882; }
+.tis-status b { color: #1e2124; }
+.tis-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 1px 8px; }
+.st-key-page [role="radiogroup"] { gap: 4px; justify-content: center; flex-wrap: nowrap; }
+.st-key-page [role="radiogroup"] > div { margin: 0; }
+.st-key-page [role="radiogroup"] label { margin: 0; padding: 8px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.st-key-page [role="radiogroup"] label > div > div:not([data-testid="stMarkdownContainer"]) { display: none; }
+@media (max-width: 900px) { .tis-status .count { display: none; } }
+.st-key-page [role="radiogroup"] label:hover { background: #f4f5f6; }
+.st-key-page [role="radiogroup"] label:has(input:checked) { background: #ecf2fe; }
+.st-key-page [role="radiogroup"] label:has(input:checked) p { color: #256ef4; font-weight: 700; }
+.st-key-page p { white-space: nowrap; }
+.tis-brand strong, .tis-brand small, .tis-status { white-space: nowrap; }
+[class*="st-key-navbar_"] [class*="_next"] { width: 100% !important; display: flex; justify-content: flex-end; }
+[class*="st-key-navbar_"] [class*="_next"] [data-testid="stButton"], [class*="st-key-navbar_"] [class*="_next"] button { width: auto !important; }
+.st-key-screen { background: #fff; border-radius: 20px; padding: 28px 32px 8px;
+  box-shadow: 0 1px 2px rgba(30, 33, 36, 0.06), 0 8px 24px rgba(30, 33, 36, 0.05); }
+[class*="st-key-navbar_"] { background: #fff; padding: 12px 0 16px;
+  margin-top: 8px; border-top: 1px solid #e6e8ea; }
+@media (max-width: 640px) {
+  .st-key-screen { padding: 20px 16px 4px; border-radius: 16px; }
+  .tis-brand small, .tis-status { display: none; }
+  .st-key-screen h3 { font-size: 1.35rem; }
+}
 .tis-steps { list-style: none; display: flex; gap: 0; margin: 4px 0 8px; padding: 0; }
 .tis-steps li { flex: 1; position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px;
   font-size: 0.82rem; color: #6d7882; text-align: center; }
@@ -55,8 +96,6 @@ st.html('''<style>
 .tis-ai { display: inline-block; background: #b34f00; color: #fff; font-size: 0.75rem; font-weight: 700;
   line-height: 1; padding: 4px 8px; border-radius: 999px; letter-spacing: 0.02em; }
 </style>''')
-st.title('거래잇수다')
-st.caption('필요한 물건·서비스를 파는 제주 업체를 찾고, 받은 견적을 같은 기준으로 비교해요.')
 try:
     config = settings()
     store.initialize(config.database_path)
@@ -91,16 +130,24 @@ def encoder_at(path: str):
 records = load_companies(str(config.database_path), config.database_path.stat().st_mtime_ns)
 by_id = {c.id: c for c in records}
 st.session_state.shortlist = [cid for cid in st.session_state.shortlist if cid in by_id]
+# 상단 앱 바: 서비스 이름 · 메뉴 탭 · 상태. 사이드바 대신 앱처럼 위에 고정한다.
+with st.container(key='appbar'):
+    brand, menu, status = st.columns([3, 6, 2], vertical_alignment='center')
+    with brand:
+        st.html('<div class="tis-brand"><span class="tis-logo" aria-hidden="true">거</span>'
+                '<div><strong>거래잇수다</strong><small>제주 거래처 찾기 · 견적 비교</small></div></div>')
+    with menu:
+        page = st.radio('메뉴', ['거래처 찾기', '최근 관심 업체', '데이터 관리'], key='page', horizontal=True,
+                        label_visibility='collapsed')
+    with status:
+        dot = '#228738' if ai_ready else '#9e6a00'
+        st.html(f'<div class="tis-status"><span class="count">업체 <b>{len(records):,}</b>곳</span>'
+                f'<span class="tis-dot" style="background:{dot}"></span>AI {"켜짐" if ai_ready else "꺼짐"}</div>')
 if st.session_state.flash:
-    st.success(st.session_state.flash)
+    st.toast(st.session_state.flash, icon=':material/check_circle:')
     st.session_state.flash = ''
 if any(c.is_demo for c in records):
     st.warning('가상 데이터로 기능을 체험 중입니다. 실제 기업 정보·대회 필수 데이터 활용 실적이 아닙니다.')
-with st.sidebar:
-    page = st.radio('메뉴', ['거래처 찾기', '최근 관심 업체', '데이터 관리'], key='page')
-    st.caption(f'등록 기업 {len(records):,}곳 · 비교 선택 {len(st.session_state.shortlist)}곳')
-    st.caption(f'LLM: {config.provider} / {config.model}' + ('' if ai_ready else ' (키 또는 외부 전송 허용 없음)'))
-    st.caption('로컬 PC 단일 사용자용입니다. 공용 PC 사용 후 견적을 삭제하세요.')
 
 
 def go(step: int) -> None:
@@ -109,13 +156,14 @@ def go(step: int) -> None:
 
 
 def nav(back: int | None, next_label: str | None, key: str) -> bool:
-    """이전/다음 버튼. 이전은 바로 이동하고, 다음은 눌렸는지만 돌려준다(검증은 호출한 단계에서)."""
-    left, right = st.columns([1, 1])
-    with left:
-        if back is not None and st.button('이전', key=f'{key}_back', icon=':material/arrow_back:'):
-            go(back)
-    with right:
-        return bool(next_label) and st.button(next_label, key=f'{key}_next', type='primary', icon=':material/arrow_forward:')
+    """화면 아래에 붙는 이전/다음 버튼 바. 이전은 바로 이동하고, 다음은 눌렸는지만 돌려준다(검증은 호출한 단계에서)."""
+    with st.container(key=f'navbar_{key}'):
+        left, right = st.columns([1, 1], vertical_alignment='center')
+        with left:
+            if back is not None and st.button('이전', key=f'{key}_back', icon=':material/arrow_back:'):
+                go(back)
+        with right:
+            return bool(next_label) and st.button(next_label, key=f'{key}_next', type='primary', icon=':material/arrow_forward:')
 
 
 def header(step: int) -> None:
@@ -528,12 +576,7 @@ def step_result() -> None:
         go(1)
 
 
-if page == '거래처 찾기':
-    current = st.session_state.step
-    header(current)
-    {1: step_need, 2: step_scope, 3: step_candidates, 4: step_inquiry, 5: step_quotes, 6: step_result}[current]()
-
-elif page == '최근 관심 업체':
+def page_popular() -> None:
     st.subheader('최근 30일, 이용자가 관심을 보인 업체')
     st.caption('상세 보기·비교 선택에서 수집한 세션별·일별 관심 수입니다. 같은 세션의 같은 날 반복 클릭은 중복 처리합니다. 품질·신용 순위가 아닙니다.')
     prune_events(config.database_path)
@@ -550,8 +593,10 @@ elif page == '최근 관심 업체':
         show_company(c, 'popular')
     st.caption('사업자번호가 있는 업체만 이 화면을 여는 동안 캐시 주기에 따라 국세청 상태를 갱신합니다. 앱이 꺼져 있을 때나 생산품 정보는 자동 갱신하지 않습니다.')
 
-elif page == '데이터 관리':
+def page_data() -> None:
     st.subheader('기업 데이터 가져오기')
+    st.caption(f'AI 설정: {config.provider} / {config.model}' + ('' if ai_ready else ' · API 키 또는 외부 전송 허용이 없어 AI가 꺼져 있습니다')
+               + ' · 이 PC 한 사람용입니다. 공용 PC에서는 사용 후 견적을 삭제하세요.')
     st.info('명세서가 아닌 실제 기업 행이 필요합니다. 원본 반출·가공·외부 전송 허용 여부는 각각 확인해야 합니다.')
     st.caption('필수 열: name/기업명, industry/업종명, products/주요생산품, region/주소_읍면동. 데이터 기준일은 source_date/데이터 기준일 또는 아래 공통 기준일로 입력합니다.')
     st.caption('제주데이터허브 「제주특별자치도 상가(상권) 정보」 CSV는 그대로 가져올 수 있습니다. 상호명·상권업종중분류명을 업체명·업종으로, '
@@ -592,3 +637,15 @@ elif page == '데이터 관리':
     if history:
         st.dataframe(history, hide_index=True, alt='원본 파일 해시와 가져오기 이력')
     st.caption('API 키는 .env에서만 설정하고 화면·보고서·Git에 포함하지 않습니다. 기본 저장소와 업로드 자료는 Git 추적에서 제외됩니다.')
+
+
+# 가운데 흰 화면 카드 안에 현재 메뉴의 화면을 그린다.
+with st.container(key='screen'):
+    if page == '거래처 찾기':
+        current = st.session_state.step
+        header(current)
+        {1: step_need, 2: step_scope, 3: step_candidates, 4: step_inquiry, 5: step_quotes, 6: step_result}[current]()
+    elif page == '최근 관심 업체':
+        page_popular()
+    else:
+        page_data()
