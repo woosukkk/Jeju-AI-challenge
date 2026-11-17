@@ -15,6 +15,15 @@ def app(monkeypatch, tmp_path):
     return AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py'), default_timeout=15).run()
 
 
+def test_import_report_lists_skipped_rows(monkeypatch, tmp_path):
+    at = app(monkeypatch, tmp_path)
+    at.session_state['import_report'] = [{'제외 사유': '빈 값 또는 형식 오류: 생산품', '행 수': 2, '원본 행 번호 (앞 20개)': '3, 7'}]
+    at.radio(key='page').set_value('데이터 관리').run()
+    assert not at.exception
+    assert any('제외한 행' in caption.value for caption in at.caption)
+    assert at.dataframe[0].value.iloc[0]['행 수'] == 2
+
+
 def test_demo_search_compare_and_download_without_keys(monkeypatch, tmp_path):
     at = app(monkeypatch, tmp_path)
     assert not at.exception

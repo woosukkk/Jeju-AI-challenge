@@ -305,12 +305,19 @@ elif page == '데이터 관리':
             raw = upload.getvalue()
             parsed = parse_file(raw, upload.name, source_name, date.fromisoformat(source_date) if source_date else None,
                                 int(sheet) if sheet.isdigit() else sheet)
-            import_companies(config.database_path, parsed, raw, source_name)
+            import_companies(config.database_path, parsed.records, raw, source_name)
             st.session_state.hits, st.session_state.trace = [], []
-            st.session_state.flash = f'{len(parsed):,}개 기업을 검증해 가져왔습니다.'
+            st.session_state['import_report'] = [
+                {'제외 사유': reason, '행 수': len(rows), '원본 행 번호 (앞 20개)': ', '.join(map(str, rows[:20]))}
+                for reason, rows in parsed.skipped.items()]
+            st.session_state.flash = (f'{len(parsed.records):,}개 기업을 검증해 가져왔습니다.'
+                                      + (f' {parsed.skipped_count:,}행은 제외했습니다. 아래 제외 내역을 확인하세요.' if parsed.skipped else ''))
             st.rerun()
         except (ValueError, OSError) as error:
             st.error(str(error) if not isinstance(error, ValidationError) else '데이터 형식을 확인하세요.')
+    if st.session_state.get('import_report'):
+        st.caption('최근 가져오기에서 제외한 행입니다. 데이터 활용 명세의 결측·제외 행 수로 기록하세요.')
+        st.dataframe(st.session_state.import_report, hide_index=True, alt='가져오기에서 제외한 행과 사유')
     if st.button('가상 데모 4곳 불러오기', key='load_demo', disabled=bool(records)):
         import_companies(config.database_path, demo_companies(), b'trade-itsuda-synthetic-v1', '가상 기능 검증 데이터')
         st.session_state.flash = '가상 데모를 불러왔습니다. 거래처 찾기에서 라벨·박스·유리병을 검색하세요.'

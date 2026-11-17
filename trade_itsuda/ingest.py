@@ -1,10 +1,12 @@
 import hashlib
 import io
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
 import pandas as pd
+from pydantic import ValidationError
 
 from .models import Company
 from .store import connect
@@ -17,8 +19,19 @@ ALIASES = {
 }
 
 
+@dataclass
+class ParseResult:
+    records: list[Company]
+    # 제외 사유 → 원본 행 번호(머리글 = 1행). 데이터 활용 명세의 결측·제외 행 수 근거.
+    skipped: dict[str, list[int]] = field(default_factory=dict)
+
+    @property
+    def skipped_count(self) -> int:
+        return sum(len(rows) for rows in self.skipped.values())
+
+
 def parse_file(content: bytes, filename: str, source_name: str, source_date: date | None = None,
-               sheet_name: str | int = 0) -> list[Company]:
+               sheet_name: str | int = 0) -> ParseResult:
     if not content or len(content) > 20 * 1024 * 1024:
         raise ValueError('비어 있거나 20MB를 초과하는 파일입니다. 허용된 기업 표를 나눠 반입하세요.')
     suffix = Path(filename).suffix.lower()
@@ -56,6 +69,7 @@ def parse_file(content: bytes, filename: str, source_name: str, source_date: dat
         raise ValueError('출처명을 입력하세요.')
     records = []
     ids = set()
+    skipped: dict[str, list[int]] = {}
     for index, row in enumerate(frame.to_dict('records'), start=2):
         raw = {key: str(row.get(key, '')).strip() for key in
                ('name', 'industry', 'products', 'region', 'business_number', 'website')}
@@ -65,14 +79,29 @@ def parse_file(content: bytes, filename: str, source_name: str, source_date: dat
         business_id = raw['business_number'].replace('-', '').replace(' ', '')
         identity = str(row.get('id', '')).strip() or business_id or f"{raw['name']}|{raw['region']}"
         company_id = hashlib.sha256(f'{source_name}|{identity}'.encode()).hexdigest()[:24]
-        if company_id in ids:
-            raise ValueError(f'{index}행: 같은 기업 식별자가 반복됩니다. 행의 집계 단위를 확인하세요.')
-        ids.add(company_id)
         try:
-            records.append(Company(id=company_id, source_name=source_name, source_date=raw_date, **raw))
-        except ValueError:
-            raise ValueError(f'{index}행: 기업 필수값·사업자번호·출처 기준일 형식을 확인하세요.') from None
-    return records
+            company = Company(id=company_id, source_name=source_name, source_date=raw_date, **raw)
+        except ValidationError as error:
+            skipped.setdefault(skip_reason(error), []).append(index)
+            continue
+        if company_id in ids:
+            skipped.setdefault('같은 기업 식별자 반복 (첫 행만 사용)', []).append(index)
+            continue
+        ids.add(company_id)
+        records.append(company)
+    if not records:
+        summary = ', '.join(f'{reason} {len(rows)}행' for reason, rows in skipped.items())
+        raise ValueError('가져올 수 있는 기업 행이 없습니다: ' + summary)
+    return ParseResult(records, skipped)
+
+
+FIELD_LABELS = {'name': '업체명', 'industry': '업종', 'products': '생산품', 'region': '지역',
+                'source_date': '데이터 기준일', 'business_number': '사업자번호', 'website': '웹사이트'}
+
+
+def skip_reason(error: ValidationError) -> str:
+    fields = sorted({FIELD_LABELS.get(str(item['loc'][0]), str(item['loc'][0])) for item in error.errors() if item['loc']})
+    return '빈 값 또는 형식 오류: ' + ', '.join(fields)
 
 
 def import_companies(path, records: list[Company], content: bytes, source_name: str) -> int:
