@@ -94,3 +94,18 @@ def test_file_date_takes_priority_over_fallback():
     from trade_itsuda.ingest import parse_file
     raw = 'name,industry,products,region,source_date\n가상,인쇄,라벨,제주,2020-07-31'.encode()
     assert parse_file(raw, 'a.csv', 'test', date(2026, 1, 1)).records[0].source_date == date(2020, 7, 31)
+
+
+def test_command_line_import_uses_store_defaults(monkeypatch, tmp_path, capsys):
+    from trade_itsuda.ingest import STORE_DATE, STORE_SOURCE, main
+    header = '상호명,상권업종중분류명,상권업종소분류명,표준산업분류명,시군구명,행정동명,지번주소\n'
+    path = tmp_path / 'store.csv'
+    path.write_bytes((header + '가상간판,인쇄,간판,간판 제조업,제주시,연동,제주특별자치도 제주시 연동 1\n').encode('cp949'))
+    database = tmp_path / 'cli.sqlite3'
+    monkeypatch.setenv('DATABASE_PATH', str(database))
+    assert main([str(path)]) == 0
+    [company] = companies(database)
+    assert (company.name, company.source_name, company.source_date) == ('가상간판', STORE_SOURCE, STORE_DATE)
+    assert import_history(database)[0]['row_count'] == 1
+    assert '1곳을' in capsys.readouterr().out
+    assert main([str(tmp_path / 'missing.csv')]) == 1  # 없는 파일은 예외 대신 실패 코드로 끝낸다.

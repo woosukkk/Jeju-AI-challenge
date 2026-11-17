@@ -11,5 +11,7 @@ if errorlevel 1 exit /b 1
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 exit /b 1
 if not exist ".env" copy /b ".env.example" ".env" >nul
-echo Setup complete. Configure .env if needed, then run run.bat.
+echo Setup complete.
+echo Next: put the Jeju store CSV at data_source\jeju_store.csv and run import_data.bat, then run run.bat.
+echo Set the API key in .env to turn on the AI Agent.
 pause

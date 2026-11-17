@@ -9,7 +9,7 @@ import pandas as pd
 from pydantic import ValidationError
 
 from .models import Company
-from .store import connect
+from .store import connect, initialize
 
 ALIASES = {
     'ent_nm': 'name', '기업명': 'name', 'ksic10_biz_nm': 'industry', '업종명': 'industry',
@@ -164,3 +164,38 @@ def demo_companies() -> list[Company]:
     return [Company(id=f'demo-{key}', name=name, industry=industry, products=products, region=region,
                     source_name='가상 기능 검증 데이터', source_date='2026-11-17', is_demo=True,
                     website=f'https://{key}.invalid') for key, name, industry, products, region in entries]
+
+
+STORE_SOURCE = '제주데이터허브 제주특별자치도 상가(상권) 정보'
+STORE_DATE = date(2025, 9, 18)  # 데이터허브에 적힌 수집일. CSV에는 기준일 열이 없다.
+
+
+def main(argv: list[str] | None = None) -> int:
+    """평가 PC용 명령줄 반입: 화면의 '데이터 관리'와 같은 검증을 거쳐 .env의 DATABASE_PATH에 넣는다."""
+    import argparse
+
+    from .config import settings
+
+    parser = argparse.ArgumentParser(description='기업 데이터 CSV/XLSX를 검증해 로컬 DB로 가져옵니다.')
+    parser.add_argument('file', type=Path)
+    parser.add_argument('--source', default=STORE_SOURCE, help='데이터셋명·제공기관 (기본: 상가(상권) 정보)')
+    parser.add_argument('--date', type=date.fromisoformat, default=STORE_DATE, help='파일에 기준일이 없을 때의 공통 기준일')
+    args = parser.parse_args(argv)
+    try:
+        content = args.file.read_bytes()
+        parsed = parse_file(content, args.file.name, args.source, args.date)
+        database = settings().database_path
+        initialize(database)
+        import_companies(database, parsed.records, content, args.source)
+    except (OSError, ValueError) as error:
+        print(f'가져오기 실패: {error}')
+        return 1
+    print(f'{len(parsed.records):,}곳을 {database}에 가져왔습니다. 제외·병합 {parsed.skipped_count:,}행.')
+    print(f'원본 SHA-256 {hashlib.sha256(content).hexdigest()}')
+    for reason, rows in parsed.skipped.items():
+        print(f'  - {reason}: {len(rows):,}행')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
