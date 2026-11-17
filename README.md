@@ -2,6 +2,8 @@
 
 제주 도민인 예비 창업자·소상공인·소규모 기업 담당자가 거래처를 찾고 기존 업체와 비교하며 견적 문의를 준비하는 로컬 AI Agent입니다.
 
+다음 AI/개발자는 **[인수인계](docs/HANDOFF.md) → [남은 작업과 완료 기준](docs/TODO.md)** 순서로 읽고 이어갑니다. 기본 구현은 있으나 실제 필수 데이터 반입·주력 LLM 실검증·최종 기획서·제출 ZIP은 남아 있습니다. 구현된 기능과 실검증 여부는 [진행 기록](docs/PROGRESS.md)에서 구분합니다.
+
 ## 시작
 
 Windows / Python 3.11에서 `setup.bat`으로 설치하고 `run.bat`으로 실행합니다. 화면은 기본 Streamlit 구성입니다. 디자인 레퍼런스는 추후 반영합니다.
@@ -44,6 +46,8 @@ Copy-Item .env.example .env
 실제 기능 단위로 커밋합니다. 새 커밋 10개마다 한 번 푸시합니다. 재배포가 승인되지 않은 원본·명세 파일, 키, 로컬 DB와 사용자 견적은 Git에 올리지 않습니다.
 
 - [제품 기획](docs/PRODUCT.md)
+- [다음 AI/개발자 인수인계](docs/HANDOFF.md)
+- [남은 작업과 완료 기준](docs/TODO.md)
 - [구현 계획](docs/IMPLEMENTATION.md)
 - [데이터 활용·이용조건](docs/DATA_USAGE.md)
 - [결과 설명과 검증 범위](docs/RESULTS.md)

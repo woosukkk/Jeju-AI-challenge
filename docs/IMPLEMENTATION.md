@@ -1,12 +1,12 @@
-# 구현 계획과 작업 범위
+# 구현 구조와 완료한 1차 작업
 
-기존 `제주거래처찾기_서비스기획.md`와 `대회정보.md`를 읽고 작성했다. 실제 구현은 코드가 없던 `C:\Jeju-AI-challenge`에서 시작한다.
+아래는 기본 구현을 만든 1차 작업의 기록이다. **다음 작업 계획은 [TODO.md](TODO.md)**, 새 AI/개발자의 시작점은 [HANDOFF.md](HANDOFF.md)다. 코드가 없던 `C:\Jeju-AI-challenge`에서 시작해 `1f81922`까지 기본 기능 10개 커밋을 작성·푸시했다. 원천 기획 Markdown은 Git에서 제외되어 다른 clone에 없을 수 있으므로 현재 `docs/`를 기준으로 이어간다.
 
 ## 스택
 
 Python 3.11, Streamlit, SQLite, pandas/NumPy, Pydantic, OpenAI SDK(Gemini 호환 API 포함), httpx, python-dotenv, openpyxl/pypdf, pytest. 선택적인 의미 검색은 sentence-transformers와 multilingual-e5-small을 CPU에서 사용한다. 금액은 Decimal로 계산한다. 기본 UI에서 제품 동작을 먼저 검증한다.
 
-## 기능 단위 커밋
+## 완료한 1차 기능 커밋
 
 1. 기획·데이터 규칙·프로젝트 설정 문서
 2. 검증 모델·설정·SQLite 저장소
@@ -19,7 +19,7 @@ Python 3.11, Streamlit, SQLite, pandas/NumPy, Pydantic, OpenAI SDK(Gemini 호환
 9. 안전한 보고서·견적 문의 초안 내보내기
 10. 신규/기존 Streamlit 화면·매뉴얼·실행 파일·통합 검증
 
-커밋 수를 맞추기 위한 빈 커밋은 만들지 않는다. 열 번째 새 기능 커밋 후 원격에 한 번 푸시하고 원격 해시를 확인한다.
+위 목록은 코드 구현 완료 기록이며 실제 데이터·API·현장 검증 완료를 뜻하지 않는다. 이후에도 기능별 커밋과 새 커밋 10개마다 푸시 규칙을 적용한다. 커밋 수를 맞추기 위한 빈 커밋은 만들지 않는다. 다음 푸시 전 실제 ahead 수를 확인하고 푸시 후 원격 해시를 대조한다.
 
 ## 변경이 닿는 곳
 
