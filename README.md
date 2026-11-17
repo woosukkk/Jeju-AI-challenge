@@ -2,11 +2,11 @@
 
 제주 도민인 예비 창업자·소상공인·소규모 기업 담당자가 거래처를 찾고 기존 업체와 비교하며 견적 문의를 준비하는 로컬 AI Agent입니다.
 
-다음 AI/개발자는 **[인수인계](docs/HANDOFF.md) → [남은 작업과 완료 기준](docs/TODO.md)** 순서로 읽고 이어갑니다. 기본 구현은 있으나 실제 필수 데이터 반입·주력 LLM 실검증·최종 기획서·제출 ZIP은 남아 있습니다. 구현된 기능과 실검증 여부는 [진행 기록](docs/PROGRESS.md)에서 구분합니다.
+다음 AI/개발자는 **[인수인계](docs/HANDOFF.md) → [남은 작업과 완료 기준](docs/TODO.md)** 순서로 읽고 이어갑니다. 제주 상가 데이터 반입, Gemini 실호출, 제출 ZIP·새 폴더 설치 확인까지 했고, 최종 기획서와 평가 PC 성능 측정이 남아 있습니다. 구현된 기능과 실검증 여부는 [진행 기록](docs/PROGRESS.md)에서 구분합니다.
 
 ## 시작
 
-Windows / Python 3.11에서 `setup.bat`으로 설치하고 `run.bat`으로 실행합니다. 화면은 기본 Streamlit 구성입니다. 디자인 레퍼런스는 추후 반영합니다.
+Windows / Python 3.11에서 `setup.bat`으로 설치하고, 제주 상가 CSV를 `data_source\jeju_store.csv`에 둔 뒤 `import_data.bat`으로 가져오고, `run.bat`으로 실행합니다. 화면은 6단계 진행형이며 범정부 디자인 시스템(KRDS) 색·글꼴과 제주 배경을 썼습니다.
 
 ```powershell
 python -m venv .venv
@@ -17,7 +17,7 @@ Copy-Item .env.example .env
 
 키는 `.env`에만 설정합니다. `LLM_PROVIDER=openai` 또는 `gemini`를 선택하고 해당 공급자의 키를 넣습니다. 국세청 상태조회에는 별도의 `NTS_API_KEY`가 필요합니다. 기업·견적 자료의 외부 LLM 전송은 기본적으로 꺼져 있습니다. 승인된 자료일 때만 `ALLOW_EXTERNAL_DATA=true`로 설정합니다. 상세한 실행·데이터 반입 절차는 [사용자 매뉴얼](docs/MANUAL.md)을 참고하세요.
 
-실제 기업 원본은 포함하지 않습니다. 데모 업체는 전부 가상이며, 데모로 챌린지의 필수 데이터 활용을 충족했다고 주장할 수 없습니다. `데이터명세서_kr.xlsx`는 실제 기업 관측 데이터가 아닙니다.
+필수 제주 데이터는 제주데이터허브 「제주특별자치도 상가(상권) 정보」(2025-09-18 수집, 57,347곳)입니다. 원천 공공데이터포털의 이용허락범위는 "제한 없음"이지만 저장소에는 CSV·DB를 넣지 않습니다. 이용조건과 열 대응은 [데이터 활용 명세](docs/DATA_USAGE.md)에 있습니다. 데모 업체 4곳은 전부 가상입니다.
 
 ## 기능과 근거
 
@@ -37,7 +37,7 @@ Copy-Item .env.example .env
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-테스트는 합성 데이터와 모의 API 응답을 사용합니다. 실제 외부 API와 원본 데이터 검증 결과는 [진행 기록](docs/PROGRESS.md)에 별도로 적습니다.
+테스트는 합성 데이터와 모의 API 응답을 사용합니다. 실제 데이터 검색 측정은 `scripts\measure_search.py`, 제출 ZIP은 `scripts\make_submission.py`로 만듭니다. 실제 외부 API와 원본 데이터 검증 결과는 [결과 설명](docs/RESULTS.md)과 [진행 기록](docs/PROGRESS.md)에 별도로 적습니다.
 
 테스트 실행 전 `requirements-dev.txt`도 설치합니다. 검증한 전체 패키지는 `requirements-lock.txt`에 고정했습니다. 로컬 의미 검색은 별도 설치 옵션이며 기본 실행에 필요하지 않습니다.
 
