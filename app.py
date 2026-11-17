@@ -24,8 +24,32 @@ EXISTING = 'existing'
 OTHER = 'other'
 
 st.set_page_config(page_title='거래잇수다', page_icon=':material/handshake:', layout='wide')
+# KRDS(범정부 디자인 시스템) 표준형 색상: primary-50 #256ef4, primary-5 #ecf2fe, gray-20 #cdd1d5, gray-50 #6d7882.
+# 테마 색·글꼴은 .streamlit/config.toml, 여기서는 기본 위젯에 없는 단계 표시기와 목적 카드 모양만 정한다.
+st.html('''<style>
+.tis-steps { list-style: none; display: flex; gap: 0; margin: 4px 0 8px; padding: 0; }
+.tis-steps li { flex: 1; position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  font-size: 0.82rem; color: #6d7882; text-align: center; }
+.tis-steps li + li::before { content: ""; position: absolute; top: 15px; right: 50%; width: 100%; height: 2px;
+  background: #cdd1d5; z-index: 0; }
+.tis-steps li.done + li::before, .tis-steps li.current::before { background: #256ef4; }
+.tis-steps .dot { position: relative; z-index: 1; width: 32px; height: 32px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-weight: 700; background: #fff; border: 2px solid #cdd1d5; color: #6d7882; }
+.tis-steps li.done .dot { background: #256ef4; border-color: #256ef4; color: #fff; }
+.tis-steps li.current .dot { border-color: #256ef4; color: #256ef4; background: #ecf2fe; }
+.tis-steps li.current { color: #1e2124; font-weight: 700; }
+.tis-steps .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.tis-step-count { font-size: 0.82rem; color: #6d7882; margin: 0; }
+.st-key-w_journey div[role="radiogroup"] { gap: 16px; flex-wrap: wrap; }
+.st-key-w_journey div[role="radiogroup"] > div { flex: 1 1 240px; padding: 16px 20px; border: 1px solid #cdd1d5;
+  border-radius: 16px; background: #fff; margin: 0; cursor: pointer; }
+.st-key-w_journey div[role="radiogroup"] > div:has(input:checked) { border-color: #256ef4; background: #ecf2fe;
+  box-shadow: inset 0 0 0 1px #256ef4; }
+.st-key-w_journey div[role="radiogroup"] > div label { font-weight: 700; }
+@media (max-width: 640px) { .tis-steps .label { display: none; } }
+</style>''')
 st.title('거래잇수다')
-st.caption('제주 거래처를 찾고, 기존 업체와 같은 조건으로 비교하고, 견적 문의까지 준비하세요.')
+st.caption('필요한 물건·서비스를 파는 제주 업체를 찾고, 받은 견적을 같은 기준으로 비교해요.')
 try:
     config = settings()
     store.initialize(config.database_path)
@@ -88,8 +112,17 @@ def nav(back: int | None, next_label: str | None, key: str) -> bool:
 
 
 def header(step: int) -> None:
-    st.progress(step / len(STEPS), text=f'{step}/{len(STEPS)} 단계 · {STEPS[step - 1]}')
-    st.caption('  ›  '.join(f'**{i}. {name}**' if i == step else f'{i}. {name}' for i, name in enumerate(STEPS, start=1)))
+    """KRDS 단계 표시기: 완료·현재·남은 단계를 구분하고, 화면 낭독기에는 '현재 단계'를 알린다."""
+    items = []
+    for i, name in enumerate(STEPS, start=1):
+        state = 'done' if i < step else 'current' if i == step else 'todo'
+        mark = '✓' if i < step else str(i)
+        extra = ' aria-current="step"' if i == step else ''
+        note = '<span class="sr">현재 단계</span>' if i == step else ('<span class="sr">완료</span>' if i < step else '')
+        items.append(f'<li class="{state}"{extra}><span class="dot" aria-hidden="true">{mark}</span>'
+                     f'<span class="label">{name}</span>{note}</li>')
+    st.html(f'<p class="tis-step-count">{len(STEPS)}단계 중 {step}단계 · {STEPS[step - 1]}</p>'
+            f'<ol class="tis-steps" aria-label="진행 단계">{"".join(items)}</ol>')
 
 
 def flow_targets() -> list[tuple[str, str, Company | None]]:
@@ -169,7 +202,8 @@ def run_search() -> None:
 def step_need() -> None:
     need = st.session_state.need
     st.subheader('어떤 거래처가 필요한가요?')
-    journey = st.radio('이용 목적', JOURNEYS, index=JOURNEYS.index(need['journey']), horizontal=True, key='w_journey')
+    journey = st.radio('무엇을 하고 싶으세요?', JOURNEYS, index=JOURNEYS.index(need['journey']), horizontal=True, key='w_journey',
+                       captions=['처음 거래할 공급처 후보를 찾아요', '지금 거래하는 곳의 견적을 기준으로 다른 곳과 비교해요'])
     query = st.text_input('필요한 품목이나 서비스를 편하게 적어 주세요', value=need['query'], max_chars=200, key='w_query',
                           placeholder='예: 가게 간판을 새로 달고 싶어요 / 택배 박스가 필요해요')
     existing = ''
@@ -317,37 +351,42 @@ def quote_form(target: str, name: str, saved_by_id: dict[str, Quote]) -> None:
         seed = dict(state.conditions)
     prefix = f'q_{target}_{state.extraction_version}_{existing_id or "new"}'
 
-    def field(container, label: str, name: str, default: str = ''):
+    def field(container, label: str, name: str, default: str = '', help: str | None = None):
         value = seed.get(name)
-        return container.text_input(label, value=str(default if value is None else value), key=f'{prefix}_{name}')
+        return container.text_input(label, value=str(default if value is None else value), key=f'{prefix}_{name}', help=help)
 
+    # KRDS 신청서 작성 패턴: 필수 칸은 숨기지 않고 섹션 제목을 두며, 도움말은 화면 위가 아니라 입력 칸 옆(툴팁)에 둔다.
     with st.form(f'quote_form_{target}'):
         company_name = field(st, '업체명', 'company_name', name) if target == OTHER else name
-        st.markdown('**① 요청 조건** · 4단계 조건을 채웠습니다. 견적서와 다르면 고치세요.')
+        st.markdown('#### ① 요청 조건')
+        st.caption('4단계에서 적은 조건을 채웠어요. 견적서 내용과 다르면 고쳐 주세요.')
         a, b, c, d = st.columns([2, 2, 1, 1])
         item = field(a, '품목', 'item')
-        specification = field(b, '규격', 'specification')
+        specification = field(b, '규격', 'specification', help='크기·재질·색 등 업체가 견적에 적은 사양')
         quantity = field(c, '수량', 'quantity')
-        unit = field(d, '단위', 'unit')
-        st.markdown('**② 금액** · 모르는 금액은 빈칸(미확인), 무료로 확인된 항목만 0')
+        unit = field(d, '단위', 'unit', help='개, 박스, 장, m² 처럼 수량을 세는 단위')
+        st.markdown('#### ② 금액')
+        st.caption('모르는 금액은 빈칸으로 두세요. 0은 무료로 확인된 경우에만 넣어요.')
         a, b, c = st.columns(3)
-        unit_price = field(a, '단가', 'unit_price')
+        unit_price = field(a, '단가', 'unit_price', help='단위 1개당 가격. 견적서의 숫자만 넣어요(쉼표 없이).')
         tax_options = ['미확인', '포함', '별도']
         tax = b.selectbox('단가에 부가세 포함?', tax_options, key=f'{prefix}_tax',
-                          index=tax_options.index({None: '미확인', True: '포함', False: '별도'}[seed.get('tax_included')]))
-        tax_rate = c.text_input('별도 세율 (%)', key=f'{prefix}_rate',
+                          index=tax_options.index({None: '미확인', True: '포함', False: '별도'}[seed.get('tax_included')]),
+                          help='견적서에 "부가세 포함"이면 포함, "부가세 별도"이면 별도를 고르세요.')
+        tax_rate = c.text_input('별도 세율 (%)', key=f'{prefix}_rate', help='부가세 별도일 때만 넣어요. 보통 10',
                                 value=str(Decimal(str(seed['tax_rate'])) * 100) if seed.get('tax_rate') is not None else '')
         a, b, c = st.columns(3)
-        shipping = field(a, '배송비 (세금 포함)', 'shipping')
-        extra_cost = field(b, '추가 비용 (세금 포함)', 'extra_cost')
-        currency = field(c, '통화', 'currency', 'KRW')
-        st.markdown('**③ 거래 조건과 근거**')
+        shipping = field(a, '배송비 (세금 포함)', 'shipping', help='세금까지 더한 최종 배송비. 무료로 확인됐으면 0, 모르면 빈칸')
+        extra_cost = field(b, '추가 비용 (세금 포함)', 'extra_cost', help='설치비·디자인비 등 단가 밖의 비용 합계. 없으면 0, 모르면 빈칸')
+        currency = field(c, '통화', 'currency', 'KRW', help='원화는 KRW')
+        st.markdown('#### ③ 거래 조건과 근거')
         a, b, c, d = st.columns(4)
-        minimum_order = field(a, '최소 주문 수량', 'minimum_order')
-        lead_days = field(b, '납기 (일)', 'lead_days')
+        minimum_order = field(a, '최소 주문 수량', 'minimum_order', help='업체가 받는 가장 적은 주문량. 요청 수량보다 크면 비교표에 표시돼요.')
+        lead_days = field(b, '납기 (일)', 'lead_days', help='주문 후 받기까지 걸리는 날 수')
         issued_at = field(c, '견적 발행일 (YYYY-MM-DD)', 'issued_at')
-        valid_until = field(d, '유효기간 (YYYY-MM-DD)', 'valid_until')
-        source_name = field(st, '견적 근거 (견적서 파일명·담당자 회신일 등)', 'source_name', '사용자 입력')
+        valid_until = field(d, '유효기간 (YYYY-MM-DD)', 'valid_until', help='이 날짜가 지나면 견적 가격이 바뀔 수 있어요.')
+        source_name = field(st, '견적 근거 (견적서 파일명·담당자 회신일 등)', 'source_name', '사용자 입력',
+                            help='나중에 다시 확인할 수 있게 견적을 받은 경로를 적어요.')
         confirmed = st.checkbox('견적서 원문과 대조해 입력값을 확인했습니다', value=bool(seed.get('confirmed', False)), key=f'{prefix}_confirmed')
         save = st.form_submit_button('이 업체 견적 저장', type='primary', key='save_quote')
     if save:

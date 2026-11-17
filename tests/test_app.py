@@ -94,8 +94,14 @@ def test_wizard_from_need_to_comparison_without_keys(monkeypatch, tmp_path):
     assert any('관심 1회' in element.value for element in at.caption)
 
 
+def step_indicator(at) -> str:
+    return next(str(h.proto) for h in at.get('html') if 'tis-steps' in str(h.proto) and 'aria-label' in str(h.proto))
+
+
 def test_wizard_blocks_missing_inputs_and_restarts(monkeypatch, tmp_path):
     at = with_demo(monkeypatch, tmp_path)
+    # KRDS 단계 표시기: 현재 단계 문구와 aria-current가 있어야 한다.
+    assert '6단계 중 1단계' in step_indicator(at) and 'aria-current' in step_indicator(at)
     at.button(key='n1_next').click().run()
     assert at.session_state['step'] == 1 and any('품목' in e.value for e in at.error)
     at.text_input(key='w_query').set_value('반도체')
@@ -104,6 +110,7 @@ def test_wizard_blocks_missing_inputs_and_restarts(monkeypatch, tmp_path):
     assert any('근거를 찾지 못했습니다' in e.value for e in at.info)
     at.button(key='n3_next').click().run()
     assert at.session_state['step'] == 3 and any('1곳 이상' in e.value for e in at.error)
+    assert '6단계 중 3단계' in step_indicator(at) and step_indicator(at).count('class=\\"done\\"') == 2
     at.button(key='n3_back').click().run()
     assert at.session_state['step'] == 2
 
