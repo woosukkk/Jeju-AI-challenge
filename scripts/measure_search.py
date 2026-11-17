@@ -55,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--agent', action='store_true', help='AI Agent 검색도 측정 (요금 발생)')
     parser.add_argument('--output', type=Path, default=Path('outputs/search_measure.json'))
+    parser.add_argument('--pause', type=float, default=0, help='Agent 질의 사이에 쉴 초 (무료 키의 분당 호출 한도 대비)')
+    parser.add_argument('--first', type=int, default=1, help='이 번호의 질의부터 측정 (1부터)')
     args = parser.parse_args(argv)
     config = settings()
     started = time.perf_counter()
@@ -62,7 +64,11 @@ def main(argv: list[str] | None = None) -> int:
     load_seconds = time.perf_counter() - started
     print(f'데이터 {len(records):,}곳, DB 읽기 {load_seconds:.2f}초 ({config.database_path})')
     rows = []
-    for query, region, words in CASES:
+    for number, (query, region, words) in enumerate(CASES, start=1):
+        if number < args.first:
+            continue
+        if args.agent and args.pause and rows:
+            time.sleep(args.pause)
         request = SearchRequest(query=query, region=region)
         started = time.perf_counter()
         hits = search(records, request)
@@ -77,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             except AgentError as error:
                 row['agent'] = f'실패: {error}'
             row['agent_seconds'] = round(time.perf_counter() - started, 1)
+        row['number'] = number
         rows.append(row)
         print(json.dumps(row, ensure_ascii=False))
     args.output.parent.mkdir(parents=True, exist_ok=True)
