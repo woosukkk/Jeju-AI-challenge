@@ -100,6 +100,38 @@ def test_json_wrapped_in_code_fence_is_accepted():
     assert advice.summary == '후보 비교'
 
 
+class StatusError(Exception):
+    def __init__(self, status_code):
+        super().__init__(f'status {status_code}')
+        self.status_code = status_code
+
+
+class FlakyClient(FakeClient):
+    """앞의 응답 대신 지정한 HTTP 오류를 먼저 낸다."""
+    def __init__(self, errors, messages):
+        super().__init__(messages)
+        self.errors = list(errors)
+
+    def create(self, **kwargs):
+        if self.errors:
+            self.requests.append(kwargs)
+            raise StatusError(self.errors.pop(0))
+        return super().create(**kwargs)
+
+
+def test_server_overload_is_retried_once_but_quota_errors_are_not(monkeypatch):
+    monkeypatch.setattr('trade_itsuda.agent.time.sleep', lambda seconds: None)
+    client = FlakyClient([503], [final('{"questions":["취급하시나요?"]}')])
+    assert inquiry_questions(config(), {'item': '상자'}, None, client) == ['취급하시나요?']
+    assert len(client.requests) == 2
+    with pytest.raises(AgentError, match='503 서버 과부하'):
+        inquiry_questions(config(), {'item': '상자'}, None, FlakyClient([503, 503], []))
+    client = FlakyClient([429], [final('{"questions":[]}')])
+    with pytest.raises(AgentError, match='429 호출 한도'):
+        inquiry_questions(config(), {'item': '상자'}, None, client)
+    assert len(client.requests) == 1
+
+
 def test_summary_with_numbers_not_in_tool_results_is_hidden():
     client = FakeClient([tool(), final('{"company_ids":["demo-print"],"summary":"후보 37곳 중 최저가입니다."}')])
     result = run_agent(config(), demo_companies(), SearchRequest(query='라벨'), client=client)

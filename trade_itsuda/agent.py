@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from dataclasses import dataclass
 from io import BytesIO
 from typing import TypeVar
@@ -79,11 +80,23 @@ def client_for(config: Settings):
                   base_url='https://generativelanguage.googleapis.com/v1beta/openai/' if config.provider == 'gemini' else None)
 
 
-def complete(client, config, messages, **kwargs):
-    try:
-        return client.chat.completions.create(model=config.model, messages=messages, max_completion_tokens=1800, **kwargs).choices[0].message
-    except Exception:
-        raise AgentError('LLM 요청에 실패했습니다. 키·모델·한도·네트워크를 확인하세요. 요청은 자동 재시도하지 않습니다.') from None
+RETRYABLE_STATUS = {500, 503}  # 서버가 요청을 처리하지 못한 일시 오류. 키·권한·한도(401/403/429)는 재시도하지 않는다.
+FAILURE_HINTS = {400: '요청 형식 또는 모델 이름', 401: 'API 키', 403: '키 권한', 404: '모델 이름', 429: '호출 한도·요금',
+                 500: '서버 오류', 503: '서버 과부하'}
+
+
+def complete(client, config, messages, *, retry_wait: float = 2.0, **kwargs):
+    for attempt in range(2):
+        try:
+            return client.chat.completions.create(model=config.model, messages=messages, max_completion_tokens=1800, **kwargs).choices[0].message
+        except Exception as error:
+            status = getattr(error, 'status_code', None)
+            if attempt == 0 and status in RETRYABLE_STATUS:
+                time.sleep(retry_wait)
+                continue
+            reason = f'{status} {FAILURE_HINTS.get(status, "")}'.strip() if status else type(error).__name__
+            raise AgentError(f'LLM 요청에 실패했습니다({reason}). 키·모델·한도·네트워크를 확인하세요.') from error
+    raise AgentError('LLM 요청에 실패했습니다.')
 
 
 def run_agent(config: Settings, records: list[Company], request: SearchRequest, encoder=None, client=None) -> AgentResult:
