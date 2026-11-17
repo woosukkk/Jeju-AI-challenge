@@ -62,8 +62,12 @@ def test_external_block_and_disallowed_tools_and_budget():
     assert client.requests == []
     with pytest.raises(AgentError, match='허용되지'):
         run_agent(config(), [], SearchRequest(query='라벨'), client=FakeClient([tool('shell')]))
+    # 도구 한도(5회)에 닿으면 도구 없이 마무리하게 하고, 그래도 도구를 부르면 중단한다.
     with pytest.raises(AgentError, match='한도'):
         run_agent(config(), [], SearchRequest(query='라벨'), client=FakeClient([tool()] * 6))
+    client = FakeClient([tool()] * 5 + [final('{"company_ids":[],"summary":"라벨 후보를 찾지 못했습니다."}')])
+    result = run_agent(config(), [], SearchRequest(query='라벨'), client=client)
+    assert len(result.trace) == 5 and client.requests[-1]['tool_choice'] == 'none'
     with pytest.raises(AgentError, match='형식'):
         run_agent(config(), [], SearchRequest(query='라벨'), client=FakeClient([tool('count_by_region', '{"bad":1}')]))
 
@@ -77,16 +81,23 @@ def test_agent_explores_categories_and_other_regions_when_empty():
     ])
     result = run_agent(config(), demo_companies(), SearchRequest(query='상자', region='서귀포'), client=client)
     assert [step['tool'] for step in result.trace] == ['list_categories', 'search_companies', 'count_by_region']
-    # 사용자가 정한 지역은 Agent가 바꾸지 못한다.
-    assert result.trace[0]['args']['region'] == '서귀포' and result.trace[0]['result']['matched_total'] == 0
+    # 분류명 확인은 제주 전체에서 하고, 후보 검색의 지역은 Agent가 바꾸지 못한다.
+    assert result.trace[0]['args']['region'] == '' and result.trace[0]['result']['matched_total'] == 2
     assert result.trace[1]['args']['region'] == '서귀포' and result.trace[1]['result_ids'] == []
     assert {'region': '제주시 한림읍', 'count': 1} in result.trace[2]['result']['regions']
     assert result.hits == [] and '한림읍에 1곳' in result.summary
     lines = trace_lines(result.trace)
-    assert lines[0] == "업종 분류 확인: '상자' → 관련 업소 0곳"
+    assert lines[0].startswith("업종 분류 확인: '상자' → 관련 업소 2곳 (")
     assert lines[1] == "업체 검색: '종이 상자' · 지역 서귀포 → 후보 0곳"
     assert lines[2].startswith("지역별 집계: '상자' → 전체 2곳") and '제주시 한림읍 1곳' in lines[2]
     assert [t['function']['name'] for t in client.requests[0]['tools']] == ['list_categories', 'search_companies', 'count_by_region']
+
+
+def test_json_wrapped_in_code_fence_is_accepted():
+    client = FakeClient([tool(), final('```json\n{"company_ids":["demo-print"],"questions":[]}\n```')])
+    assert run_agent(config(), demo_companies(), SearchRequest(query='라벨'), client=client).hits[0].company.id == 'demo-print'
+    advice = explain_comparison(config(), TABLE, '기존상회', FakeClient([final('```json\n{"summary":"후보 비교"}\n```')]))
+    assert advice.summary == '후보 비교'
 
 
 def test_summary_with_numbers_not_in_tool_results_is_hidden():
