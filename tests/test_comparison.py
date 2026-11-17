@@ -1,12 +1,13 @@
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from trade_itsuda.comparison import calculate, compare
 from trade_itsuda.models import Quote
 
 
 def quote(**changes):
-    values = dict(id='a', company_id='a', company_name='기존 업체', item='라벨', specification='50mm', unit='개',
+    values: dict[str, Any] = dict(id='a', company_id='a', company_name='기존 업체', item='라벨', specification='50mm', unit='개',
                   quantity='3', unit_price='0.1', tax_included=False, tax_rate='0.1', shipping='0', extra_cost='0', confirmed=True)
     return Quote(**(values | changes))
 
