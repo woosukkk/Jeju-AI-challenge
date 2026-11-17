@@ -13,7 +13,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-FOLDER = '거래잇수다'
+FOLDER = 'trade-itsuda'  # 압축 프로그램마다 한글 이름 처리가 달라 영문으로 둔다.
 DATA_NAME = 'data_source/jeju_store.csv'
 # 담기면 안 되는 경로: 실제 키 설정, 로컬 DB·사용자 견적, 가상환경, 모델, 내려받은 원본 표.
 FORBIDDEN = re.compile(r'(^|/)(\.env(\..*)?|\.venv/.*|\.git/.*|models/.*|data/.*|outputs/.*)$|\.(sqlite3?|db|xlsx|xls)$')
@@ -56,7 +56,7 @@ def build(output: Path, data: Path | None) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='제출 ZIP 만들기')
     parser.add_argument('--data', type=Path, help='함께 넣을 상가(상권) 정보 CSV (선택)')
-    parser.add_argument('--output', type=Path, help='기본: dist/거래잇수다_<커밋>.zip')
+    parser.add_argument('--output', type=Path, help='기본: dist/trade-itsuda_<커밋>.zip')
     args = parser.parse_args(argv)
     commit = git('rev-parse', '--short', 'HEAD').decode().strip()
     output = args.output or ROOT / 'dist' / f'{FOLDER}_{commit}.zip'
