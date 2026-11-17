@@ -16,7 +16,28 @@ ALIASES = {
     'main_products': 'products', '주요생산품': 'products', 'address_emd': 'region',
     '주소_읍면동': 'region', 'base_date': 'source_date', '데이터 기준일': 'source_date',
     'biz_num': 'business_number', '사업자번호': 'business_number', 'ked_code': 'id', 'kedcd': 'id',
+    # 제주데이터허브 「제주특별자치도 상가(상권) 정보」(https://jejudatahub.net/data/view/data/793)
+    '상호명': 'name', '상권업종중분류명': 'industry',
 }
+
+
+def with_store_fields(frame: pd.DataFrame) -> pd.DataFrame:
+    """상가(상권) 정보처럼 생산품·지역이 여러 열로 나뉜 표를 기업 필드로 합친다. 해당 열이 없으면 그대로 둔다."""
+    def joined(parts: list[str], separator: str) -> pd.Series:
+        return frame[parts].apply(lambda row: separator.join(dict.fromkeys(v.strip() for v in row if v.strip())), axis=1)
+
+    columns = set(frame.columns)
+    products = [c for c in ('상권업종소분류명', '표준산업분류명') if c in columns]
+    if 'products' not in columns and products:
+        frame['products'] = joined(products, ' / ')
+    region = [c for c in ('시군구명', '행정동명') if c in columns]
+    if 'region' not in columns and '행정동명' in columns:
+        frame['region'] = joined(region, ' ')
+    # 도로명주소는 건물번호가 빠진 경우가 있어 지번주소와 함께 같은 이름 업체를 구분한다.
+    address = [c for c in ('지번주소', '도로명주소') if c in columns]
+    if 'address' not in columns and address:
+        frame['address'] = joined(address, ' | ')
+    return frame
 
 
 @dataclass
@@ -61,6 +82,7 @@ def parse_file(content: bytes, filename: str, source_name: str, source_date: dat
         raise ValueError('동일 필드로 대응되는 열이 여러 개입니다. 중복 열을 확인하세요.')
     frame = frame.iloc[1:].reset_index(drop=True)
     frame.columns = pd.Index(columns)
+    frame = with_store_fields(frame)
     missing = {'name', 'industry', 'products', 'region'} - set(frame.columns)
     if missing:
         raise ValueError('실제 기업 테이블에 필요한 열이 없습니다: ' + ', '.join(sorted(missing)))
@@ -77,7 +99,9 @@ def parse_file(content: bytes, filename: str, source_name: str, source_date: dat
         if isinstance(raw_date, str) and len(raw_date) == 8 and raw_date.isdigit():
             raw_date = f'{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}'
         business_id = raw['business_number'].replace('-', '').replace(' ', '')
-        identity = str(row.get('id', '')).strip() or business_id or f"{raw['name']}|{raw['region']}"
+        address = str(row.get('address', '')).strip()
+        identity = (str(row.get('id', '')).strip() or business_id
+                    or f"{raw['name']}|{raw['region']}" + (f'|{address}' if address else ''))
         company_id = hashlib.sha256(f'{source_name}|{identity}'.encode()).hexdigest()[:24]
         try:
             company = Company(id=company_id, source_name=source_name, source_date=raw_date, **raw)

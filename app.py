@@ -291,6 +291,8 @@ elif page == '데이터 관리':
     st.subheader('기업 데이터 가져오기')
     st.info('명세서가 아닌 실제 기업 행이 필요합니다. 원본 반출·가공·외부 전송 허용 여부는 각각 확인해야 합니다.')
     st.caption('필수 열: name/기업명, industry/업종명, products/주요생산품, region/주소_읍면동. 데이터 기준일은 source_date/데이터 기준일 또는 아래 공통 기준일로 입력합니다.')
+    st.caption('제주데이터허브 「제주특별자치도 상가(상권) 정보」 CSV는 그대로 가져올 수 있습니다. 상호명·상권업종중분류명을 업체명·업종으로, '
+               '상권업종소분류명·표준산업분류명을 생산품으로, 시군구명·행정동명을 지역으로 씁니다. 파일에 기준일이 없으니 공통 기준일(수집일)을 입력하세요.')
     with st.form('import_form'):
         upload = st.file_uploader('기업 데이터 CSV 또는 XLSX', type=['csv', 'xlsx'], key='company_file')
         source_name = st.text_input('정확한 데이터셋명·제공기관', key='source_name')

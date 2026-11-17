@@ -1,6 +1,8 @@
 import pytest
 
 from trade_itsuda.ingest import demo_companies, import_companies, parse_file
+from trade_itsuda.models import SearchRequest
+from trade_itsuda.retrieval import search
 from trade_itsuda.store import companies, import_history, initialize
 
 
@@ -36,6 +38,29 @@ def test_invalid_rows_are_skipped_with_reasons():
     assert parsed.skipped_count == 2
     with pytest.raises(ValueError, match='가져올 수 있는 기업 행이 없습니다'):
         parse_file('name,industry,products,region\n가상,인쇄,,제주시\n'.encode(), 'x.csv', '출처')
+
+
+def test_jeju_store_table_columns_are_combined():
+    from datetime import date
+    header = ('상호명,상권업종대분류명,상권업종중분류명,상권업종소분류명,표준산업분류명,시도명,시군구명,행정동명,법정동명,'
+              '행정동코드,법정동코드,지번주소,도로명주소,신우편번호,경도,위도\n')
+    def row(name, mid, small, standard, emd, lot):
+        return (f'{name},소매,{mid},{small},{standard},제주특별자치도,제주시,{emd},{emd},5011010300,5011010300,'
+                f'제주특별자치도 제주시 {emd} {lot},제주특별자치도 제주시 중앙로,63194,126.5,33.5\n')
+    raw = (header + row('가상포장', '종합 소매', '포장재', '포장재료 소매업', '이도1동', '1-1')
+           + row('가상포장', '종합 소매', '포장재', '포장재료 소매업', '이도1동', '2-5')
+           + row('가상인쇄', '인쇄', '인쇄', '인쇄', '노형동', '3-2')
+           + row('빈업종', '종합 소매', '', '', '노형동', '4-4')).encode('cp949')
+    parsed = parse_file(raw, '제주특별자치도 상가(상권) 정보.csv', '제주데이터허브 상가(상권) 정보', date(2025, 9, 18))
+    first = parsed.records[0]
+    assert (first.name, first.industry, first.products, first.region) == ('가상포장', '종합 소매', '포장재 / 포장재료 소매업', '제주시 이도1동')
+    assert first.source_date == date(2025, 9, 18)
+    # 같은 이름·같은 동이라도 지번이 다르면 다른 업소로 보관한다.
+    assert len({c.id for c in parsed.records[:2]}) == 2
+    assert parsed.records[2].products == '인쇄'
+    assert parsed.skipped == {'빈 값 또는 형식 오류: 생산품': [5]}
+    hits = search(parsed.records, SearchRequest(query='포장 박스가 필요해요', region='이도1동'))
+    assert [h.company.name for h in hits] == ['가상포장', '가상포장']
 
 
 def test_import_rolls_back_all_rows_on_older_snapshot(tmp_path):
