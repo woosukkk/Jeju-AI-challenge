@@ -7,7 +7,7 @@ import streamlit as st
 from pydantic import ValidationError
 
 from trade_itsuda import store
-from trade_itsuda.agent import AgentError, extract_quote, quote_text, run_agent
+from trade_itsuda.agent import AgentError, explain_comparison, extract_quote, inquiry_questions, quote_text, run_agent
 from trade_itsuda.business import refresh_status
 from trade_itsuda.comparison import compare
 from trade_itsuda.config import settings
@@ -243,6 +243,26 @@ elif page == '견적 비교':
             with st.container(horizontal=True):
                 st.download_button('비교 보고서 (HTML)', html_report(rows, baseline_id, records), '거래잇수다_비교.html', 'text/html', key='download_html')
                 st.download_button('비교표 (CSV)', csv_report(rows), '거래잇수다_비교.csv', 'text/csv', key='download_csv')
+            table = rows_for_export(rows)
+            # 견적 내용이나 기준이 바뀌면 이전 해설을 보여주지 않는다.
+            advice_key = repr((table, baseline_id))
+            if st.button('AI 비교 해설 받기', key='explain_compare', disabled=not (config.llm_key and config.allow_external_data)):
+                try:
+                    with st.spinner('비교표를 해설하는 중'):
+                        st.session_state['advice'] = (advice_key, explain_comparison(config, table, saved_by_id[baseline_id].company_name))
+                except AgentError as error:
+                    st.error(str(error))
+            advice = st.session_state.get('advice')
+            if advice and advice[0] == advice_key:
+                result = advice[1]
+                with st.container(border=True):
+                    st.caption('AI 비교 해설 · 숫자는 위 비교표 값만 허용합니다. 결정은 업체 확인 후 직접 하세요.')
+                    st.text(result.summary)
+                    for check in result.checks:
+                        st.text('확인할 점: ' + check)
+                    for label, text in [('유지', result.keep), ('병행', result.parallel), ('전환', result.switch)]:
+                        if text:
+                            st.text(f'{label} 검토 조건: {text}')
         elif len(selected_ids) > 6:
             st.error('견적은 최대 6개를 선택하세요.')
         delete_id = st.selectbox('삭제할 견적', list(saved_by_id), format_func=lambda qid: saved_by_id[qid].company_name, key='delete_quote_id')
@@ -262,12 +282,24 @@ elif page == '문의 준비':
         quantity = st.text_input('요청 수량', key='inquiry_quantity')
         unit = st.text_input('요청 단위', key='inquiry_unit')
         notes = st.text_area('추가 요청', key='inquiry_notes')
+        use_ai_questions = st.checkbox('AI가 이 업체의 등록 업종·생산품에 맞는 확인 질문 추가', key='inquiry_ai',
+                                       disabled=not (config.llm_key and config.allow_external_data))
         create = st.form_submit_button('문의 초안 만들기', key='create_inquiry')
     if create:
         try:
             if Decimal(quantity) <= 0 or not Decimal(quantity).is_finite():
                 raise ValueError()
-            st.session_state['inquiry_draft'] = inquiry(name, item, spec, quantity, unit, notes)
+            draft = inquiry(name, item, spec, quantity, unit, notes)
+            if use_ai_questions:
+                # 비교에 담은 업체면 등록 기록을 함께 보내고, 직접 입력한 업체는 요청 조건만 보낸다.
+                company = next((by_id[cid] for cid in st.session_state.shortlist if by_id[cid].name == name.strip()), None)
+                with st.spinner('업체별 확인 질문을 만드는 중'):
+                    questions = inquiry_questions(config, {'item': item, 'specification': spec, 'quantity': quantity,
+                                                           'unit': unit, 'notes': notes}, company)
+                draft = inquiry(name, item, spec, quantity, unit, notes, questions)
+            st.session_state['inquiry_draft'] = draft
+        except AgentError as error:
+            st.error(str(error))
         except (ValueError, ArithmeticError):
             st.error('필수 항목과 양수 수량을 입력하세요.')
     if st.session_state.get('inquiry_draft'):

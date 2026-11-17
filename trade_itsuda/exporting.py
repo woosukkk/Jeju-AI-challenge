@@ -6,14 +6,19 @@ from .comparison import Comparison, today
 from .models import Company
 
 
-def inquiry(company_name: str, item: str, specification: str, quantity: str, unit: str, notes: str = '') -> str:
+def inquiry(company_name: str, item: str, specification: str, quantity: str, unit: str, notes: str = '',
+            questions: list[str] | None = None) -> str:
     if not all(value.strip() for value in [company_name, item, specification, quantity, unit]):
         raise ValueError('업체명·품목·규격·수량·단위를 입력하세요.')
     if any(len(value) > 2000 for value in [company_name, item, specification, quantity, unit, notes]):
         raise ValueError('입력 항목은 각각 2,000자 이하여야 합니다.')
+    extra = ''
+    if questions:
+        extra = '함께 확인 부탁드립니다.\n' + ''.join(f'{n}. {q}\n' for n, q in enumerate(questions, start=1)) + '\n'
     return (f'{company_name} 담당자님께\n\n아래 조건의 취급·공급 가능 여부와 견적을 문의드립니다.\n'
             f'- 품목: {item}\n- 규격: {specification}\n- 요청 수량: {quantity} {unit}\n'
             f'- 추가 요청: {notes or "없음"}\n\n'
+            + extra +
             '단가와 통화, 부가세 포함 여부·세율, 세금 포함 배송비·추가 비용, 최소 주문 수량, '
             '납기, 견적 유효기간을 알려주시면 감사하겠습니다.\n'
             '거래 조건과 업체 담당자 연락처도 함께 확인 부탁드립니다.\n\n'

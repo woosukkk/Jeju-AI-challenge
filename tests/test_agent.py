@@ -3,7 +3,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from trade_itsuda.agent import AgentError, extract_quote, quote_text, run_agent
+from trade_itsuda.agent import AgentError, explain_comparison, extract_quote, inquiry_questions, quote_text, run_agent
 from trade_itsuda.config import Settings
 from trade_itsuda.ingest import demo_companies
 from trade_itsuda.models import SearchRequest
@@ -89,6 +89,39 @@ def test_summary_with_numbers_not_in_tool_results_is_hidden():
     result = run_agent(config(), demo_companies(), SearchRequest(query='라벨'), client=client)
     assert result.hits[0].company.id == 'demo-print'
     assert result.summary == '' and result.trace[-1]['tool'] == 'summary_check'
+
+
+TABLE = [{'업체': '기존상회', '총액': '110000.00', '기준 대비 차액': '0.00', '비교 제한': ''},
+         {'업체': '가상포장', '총액': '99000.00', '기준 대비 차액': '-11000.00', '비교 제한': ''},
+         {'업체': '가상인쇄', '총액': '미확정', '기준 대비 차액': '비교 불가', '비교 제한': '배송비 미확인'}]
+
+
+def test_comparison_advice_uses_only_table_numbers():
+    good = final('{"summary":"가상포장은 기존상회보다 11,000원 낮습니다. 견적 3개 중 1곳은 총액 미확정입니다.",'
+                 '"checks":["가상인쇄의 배송비를 확인하세요."],"keep":"","parallel":"","switch":"가상포장의 납기가 맞으면"}')
+    advice = explain_comparison(config(), TABLE, '기존상회', FakeClient([good]))
+    assert advice.checks == ['가상인쇄의 배송비를 확인하세요.']
+    with pytest.raises(AgentError, match='없는 숫자'):
+        explain_comparison(config(), TABLE, '기존상회', FakeClient([final('{"summary":"연간 132,000원을 아낄 수 있습니다."}')]))
+    with pytest.raises(AgentError, match='형식'):
+        explain_comparison(config(), TABLE, '기존상회', FakeClient([final('not json')]))
+    client = FakeClient([])
+    with pytest.raises(AgentError):
+        explain_comparison(config(False), TABLE, '기존상회', client)
+    assert client.requests == []
+
+
+def test_inquiry_questions_are_added_to_the_fixed_draft():
+    from trade_itsuda.exporting import inquiry
+    client = FakeClient([final('{"questions":["포장 및 충전업으로 등록되어 있는데 종이 상자 제작도 하시나요?"]}')])
+    company = demo_companies()[1]
+    questions = inquiry_questions(config(), {'item': '종이 상자', 'quantity': '500'}, company, client)
+    sent = client.requests[0]['messages'][1]['content']
+    assert company.products in sent and '종이 상자' in sent
+    draft = inquiry(company.name, '종이 상자', '30cm', '500', '개', '', questions)
+    assert '1. 포장 및 충전업으로 등록되어 있는데' in draft and '아직 발송되지 않았습니다' in draft
+    with pytest.raises(AgentError):
+        inquiry_questions(config(), {'item': '상자'}, None, FakeClient([final('{"questions":["' + '가' * 201 + '"]}')]))
 
 
 def test_unconfirmed_extraction_and_read_boundaries():
