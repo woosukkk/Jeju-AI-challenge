@@ -7,7 +7,8 @@ import streamlit as st
 from pydantic import ValidationError
 
 from trade_itsuda import store
-from trade_itsuda.agent import AgentError, explain_comparison, extract_quote, inquiry_questions, quote_text, run_agent
+from trade_itsuda.agent import (AgentError, explain_comparison, extract_quote, inquiry_questions, quote_text, run_agent,
+                                trace_lines)
 from trade_itsuda.business import refresh_status
 from trade_itsuda.comparison import compare
 from trade_itsuda.config import settings
@@ -139,8 +140,12 @@ if page == '거래처 찾기':
     for question in st.session_state.questions:
         st.text('추가로 확인할 점: ' + question)
     if st.session_state.trace:
-        with st.expander('Agent 수행 기록'):
-            st.json(st.session_state.trace)
+        with st.container(border=True):
+            st.caption('Agent가 수행한 단계')
+            for number, line in enumerate(trace_lines(st.session_state.trace), start=1):
+                st.text(f'{number}. {line}')
+            with st.expander('도구 호출 원본 기록'):
+                st.json(st.session_state.trace)
     if st.session_state.get('searched') and not st.session_state.hits:
         st.info('조건에 맞는 근거를 찾지 못했습니다. 품목을 짧게 입력하거나 지역·업종 조건을 넓혀보세요.')
     for hit in st.session_state.hits:

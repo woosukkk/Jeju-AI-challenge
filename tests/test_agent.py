@@ -3,7 +3,8 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from trade_itsuda.agent import AgentError, explain_comparison, extract_quote, inquiry_questions, quote_text, run_agent
+from trade_itsuda.agent import (AgentError, explain_comparison, extract_quote, inquiry_questions, quote_text, run_agent,
+                                trace_lines)
 from trade_itsuda.config import Settings
 from trade_itsuda.ingest import demo_companies
 from trade_itsuda.models import SearchRequest
@@ -81,6 +82,10 @@ def test_agent_explores_categories_and_other_regions_when_empty():
     assert result.trace[1]['args']['region'] == '서귀포' and result.trace[1]['result_ids'] == []
     assert {'region': '제주시 한림읍', 'count': 1} in result.trace[2]['result']['regions']
     assert result.hits == [] and '한림읍에 1곳' in result.summary
+    lines = trace_lines(result.trace)
+    assert lines[0] == "업종 분류 확인: '상자' → 관련 업소 0곳"
+    assert lines[1] == "업체 검색: '종이 상자' · 지역 서귀포 → 후보 0곳"
+    assert lines[2].startswith("지역별 집계: '상자' → 전체 2곳") and '제주시 한림읍 1곳' in lines[2]
     assert [t['function']['name'] for t in client.requests[0]['tools']] == ['list_categories', 'search_companies', 'count_by_region']
 
 

@@ -124,6 +124,27 @@ def run_agent(config: Settings, records: list[Company], request: SearchRequest, 
     raise AgentError('AI 검색을 완료하지 못했습니다.')
 
 
+def trace_lines(trace: list[dict]) -> list[str]:
+    """Agent 수행 기록을 사용자가 읽을 수 있는 단계 문장으로 바꾼다. 숫자는 기록된 도구 결과 그대로다."""
+    lines = []
+    for step in trace:
+        tool, args, result = step.get('tool'), step.get('args', {}), step.get('result', {})
+        if tool == 'search_companies':
+            scope = ''.join(f' · {label} {args[key]}' for key, label in [('region', '지역'), ('industry', '업종')] if args.get(key))
+            lines.append(f"업체 검색: '{args.get('query', '')}'{scope} → 후보 {len(step.get('result_ids', []))}곳")
+        elif tool == 'list_categories':
+            top = ', '.join(f"{c['industry']} {c['count']}곳" for c in result.get('categories', [])[:3])
+            lines.append(f"업종 분류 확인: '{args.get('keyword', '')}' → 관련 업소 {result.get('matched_total', 0)}곳"
+                         + (f' ({top})' if top else ''))
+        elif tool == 'count_by_region':
+            top = ', '.join(f"{r['region']} {r['count']}곳" for r in result.get('regions', [])[:3])
+            lines.append(f"지역별 집계: '{args.get('query', '')}' → 전체 {result.get('matched_total', 0)}곳"
+                         + (f' (많은 곳: {top})' if top else ''))
+        elif tool == 'summary_check':
+            lines.append('요약 검증: ' + str(step.get('result', '')))
+    return lines
+
+
 T = TypeVar('T', bound=Record)
 
 
