@@ -19,16 +19,48 @@ def document(company: Company) -> str:
     return f'{company.name} / {company.industry} / {company.products} / {company.region}'
 
 
-def tokens(query: str) -> set[str]:
-    words = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', query.lower()))
-    stop = {'업체', '거래처', '찾아줘', '찾고', '싶어', '필요해', '있는', '추천', '제주', '제주도'}
-    words -= stop
-    # shortcut: 작은 품목 사전만 확장, 실제 검색 실패 사례가 쌓이면 사전을 보완.
-    for concept, variants in {'포장': ['박스', '상자', '패키지'], '라벨': ['스티커'],
-                              '용기': ['유리병', '잼병'], '청소': ['시설 관리']}.items():
-        if any(concept in word for word in words.copy()):
-            words.update([concept, *variants])
-    return words
+STOP_WORDS = {'업체', '거래처', '찾아줘', '찾고', '싶어', '필요해', '있는', '추천', '제주', '제주도',
+              '필요', '있어', '구하고', '구해', '주문', '어디', '알려줘', '파는', '하는', '해주는'}
+# 긴 어미부터 떼어 낸다. 명사 끝 글자와 겹칠 수 있어 원래 낱말도 함께 검색한다.
+SUFFIXES = sorted({'을', '를', '이', '가', '은', '는', '도', '만', '에', '의', '와', '과', '랑', '요', '로',
+                   '으로', '에서', '에게', '한테', '까지', '부터', '이랑', '이요', '이나', '나',
+                   '해', '해요', '하고', '해줄', '할', '해서', '해줘'}, key=len, reverse=True)
+CONCEPTS = {'포장': ['박스', '상자', '패키지'], '라벨': ['스티커'],
+            '용기': ['유리병', '잼병'], '청소': ['시설 관리']}
+
+
+def stem(word: str) -> str:
+    for suffix in SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 2:
+            return word[:-len(suffix)]
+    return word
+
+
+def tokens(query: str) -> list[set[str]]:
+    """질의 낱말마다 일치로 인정할 표현 묶음을 만든다. 묶음 하나는 점수에 한 번만 반영된다."""
+    groups = []
+    for word in dict.fromkeys(re.findall(r'[가-힣a-zA-Z0-9]{2,}', query.lower())):
+        base = stem(word)
+        if word in STOP_WORDS or base in STOP_WORDS:
+            continue
+        variants = {word, base}
+        # shortcut: 작은 품목 사전만 확장, 실제 검색 실패 사례가 쌓이면 사전을 보완.
+        for concept, synonyms in CONCEPTS.items():
+            if concept in base or any(synonym in base for synonym in synonyms):
+                variants.update([concept, *synonyms])
+        groups.append(variants)
+    return groups
+
+
+def matched_terms(groups: list[set[str]], text: str) -> list[str]:
+    text = text.lower()
+    compact = re.sub(r'\s+', '', text)
+    matched = []
+    for variants in groups:
+        hit = sorted(v for v in variants if v in text or v.replace(' ', '') in compact)
+        if hit:
+            matched.append(max(hit, key=len))
+    return sorted(matched)
 
 
 def load_encoder(model_path: str):
@@ -62,7 +94,7 @@ def search(records: list[Company], request: SearchRequest, encoder=None) -> list
         evidence = []
         weight = 0
         for label, text, multiplier in [('생산품', company.products, 3), ('업종', company.industry, 2), ('업체명', company.name, 1)]:
-            matched = sorted(term for term in terms if term in text.lower())
+            matched = matched_terms(terms, text)
             if matched:
                 weight += multiplier * len(matched)
                 evidence.append(f'{label}에서 일치: {", ".join(matched)}')

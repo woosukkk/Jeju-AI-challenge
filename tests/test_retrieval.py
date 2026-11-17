@@ -13,6 +13,20 @@ def test_keyword_filter_and_no_invented_supplier():
     assert search(demo_companies(), SearchRequest(query='라벨', region='서귀포')) == []
 
 
+def test_sentence_queries_with_particles_and_compounds():
+    expected = {
+        '유리병을 구하고 싶어요': 'demo-glass',
+        '박스가 필요해요': 'demo-box',
+        '종이상자 주문': 'demo-box',
+        '잼병이요': 'demo-glass',
+        '스티커를 인쇄해 줄 곳': 'demo-print',
+    }
+    for query, company_id in expected.items():
+        hits = search(demo_companies(), SearchRequest(query=query))
+        assert hits and hits[0].company.id == company_id, query
+    assert search(demo_companies(), SearchRequest(query='반도체가 필요해요')) == []
+
+
 def test_semantic_is_filtered_and_labelled():
     class Encoder:
         def encode(self, texts, **kwargs):
