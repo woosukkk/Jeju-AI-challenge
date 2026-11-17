@@ -47,6 +47,13 @@ st.html('''<style>
   box-shadow: inset 0 0 0 1px #256ef4; }
 .st-key-w_journey div[role="radiogroup"] > div label { font-weight: 700; }
 @media (max-width: 640px) { .tis-steps .label { display: none; } }
+/* 제주 포인트: 카드·상자는 제주도청 누리집처럼 둥글게(16px), 버튼·입력칸은 KRDS 6px 유지.
+   AI가 만든 내용에만 제주 주황(#b34f00, 흰 배경 대비 약 7:1)을 쓴다. KRDS 강조색 규칙대로 화면의 5% 이하. */
+[class*="st-key-card_"], .st-key-ai_summary, .st-key-ai_advice, [data-testid="stExpander"] details { border-radius: 16px !important; }
+.st-key-ai_summary, .st-key-ai_advice { border-left: 4px solid #b34f00 !important; background: #fff8f2; }
+.tis-ai-label { margin: 0; font-weight: 700; color: #1e2124; display: flex; align-items: center; gap: 8px; }
+.tis-ai { display: inline-block; background: #b34f00; color: #fff; font-size: 0.75rem; font-weight: 700;
+  line-height: 1; padding: 4px 8px; border-radius: 999px; letter-spacing: 0.02em; }
 </style>''')
 st.title('거래잇수다')
 st.caption('필요한 물건·서비스를 파는 제주 업체를 찾고, 받은 견적을 같은 기준으로 비교해요.')
@@ -135,8 +142,13 @@ def flow_targets() -> list[tuple[str, str, Company | None]]:
     return targets
 
 
+def ai_label(title: str) -> None:
+    """AI가 만든 내용 위에 붙이는 제주 주황 'AI' 배지. title은 코드에 적은 고정 문구만 넣는다."""
+    st.html(f'<p class="tis-ai-label"><span class="tis-ai">AI</span>{title}</p>')
+
+
 def show_company(c: Company, prefix: str) -> None:
-    with st.container(border=True):
+    with st.container(border=True, key=f'card_{prefix}_{c.id}'):
         st.subheader(c.name)
         st.text(f'{c.industry} · {c.region}')
         st.text('생산품 기록: ' + c.products)
@@ -260,8 +272,10 @@ def step_candidates() -> None:
     if state.search_note:
         st.warning(state.search_note)
     if state.summary:
-        st.info('AI 탐색 요약: ' + state.summary)
-        st.caption('요약의 숫자는 Agent 도구가 이 PC의 데이터에서 센 값만 허용합니다. 판단은 아래 근거와 함께 확인하세요.')
+        with st.container(border=True, key='ai_summary'):
+            ai_label('Agent 탐색 요약')
+            st.text(state.summary)
+            st.caption('요약의 숫자는 Agent 도구가 이 PC의 데이터에서 센 값만 허용합니다. 판단은 아래 근거와 함께 확인하세요.')
     for question in state.questions:
         st.text('추가로 확인할 점: ' + question)
     if state.trace:
@@ -498,8 +512,9 @@ def step_result() -> None:
                 st.error(str(error))
         if state.advice and state.advice[0] == advice_key:
             result = state.advice[1]
-            with st.container(border=True):
-                st.caption('AI 비교 해설 · 숫자는 위 비교표 값만 허용합니다. 결정은 업체 확인 후 직접 하세요.')
+            with st.container(border=True, key='ai_advice'):
+                ai_label('비교 해설')
+                st.caption('숫자는 위 비교표 값만 허용합니다. 결정은 업체 확인 후 직접 하세요.')
                 st.text(result.summary)
                 for check in result.checks:
                     st.text('확인할 점: ' + check)
