@@ -27,7 +27,7 @@ except (ValueError, OSError):
     st.error('환경 설정 또는 데이터 폴더를 확인하세요. README의 설치 절차를 참고하세요.')
     st.stop()
 
-for key, value in {'session_id': str(uuid4()), 'shortlist': [], 'hits': [], 'questions': [], 'trace': [],
+for key, value in {'session_id': str(uuid4()), 'shortlist': [], 'hits': [], 'questions': [], 'trace': [], 'summary': '',
                    'extracted': {}, 'extraction_version': 0, 'flash': ''}.items():
     st.session_state.setdefault(key, value)
 
@@ -117,7 +117,7 @@ if page == '거래처 찾기':
         semantic = st.checkbox('로컬 의미 검색 함께 사용', key='semantic', help='선택 설치 및 models/e5 모델 준비가 필요합니다. 자동 다운로드하지 않습니다.')
         submitted = st.form_submit_button('거래처 찾기', type='primary', key='search_submit')
     if submitted:
-        st.session_state.hits, st.session_state.questions, st.session_state.trace = [], [], []
+        st.session_state.hits, st.session_state.questions, st.session_state.trace, st.session_state.summary = [], [], [], ''
         try:
             request = SearchRequest(query=query, region='' if region == '전체' else region, industry='' if industry == '전체' else industry)
             with st.spinner('근거를 확인하며 검색 중'):
@@ -125,6 +125,7 @@ if page == '거래처 찾기':
                 if use_ai:
                     result = run_agent(config, records, request, encoder)
                     st.session_state.hits, st.session_state.questions, st.session_state.trace = result.hits, result.questions, result.trace
+                    st.session_state.summary = result.summary
                 else:
                     st.session_state.hits = search(records, request, encoder)
             st.session_state['searched'] = True
@@ -132,6 +133,9 @@ if page == '거래처 찾기':
             st.error(str(error))
         except (ValueError, OSError):
             st.error('검색 조건 또는 로컬 모델을 확인하세요. 품목을 입력하고 기본 검색부터 시도할 수 있습니다.')
+    if st.session_state.summary:
+        st.info('AI 탐색 요약: ' + st.session_state.summary)
+        st.caption('요약의 숫자는 Agent 도구가 이 PC의 데이터에서 센 값만 허용합니다. 판단은 아래 근거와 함께 확인하세요.')
     for question in st.session_state.questions:
         st.text('추가로 확인할 점: ' + question)
     if st.session_state.trace:

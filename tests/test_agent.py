@@ -62,7 +62,33 @@ def test_external_block_and_disallowed_tools_and_budget():
     with pytest.raises(AgentError, match='허용되지'):
         run_agent(config(), [], SearchRequest(query='라벨'), client=FakeClient([tool('shell')]))
     with pytest.raises(AgentError, match='한도'):
-        run_agent(config(), [], SearchRequest(query='라벨'), client=FakeClient([tool(), tool(), tool()]))
+        run_agent(config(), [], SearchRequest(query='라벨'), client=FakeClient([tool()] * 6))
+    with pytest.raises(AgentError, match='형식'):
+        run_agent(config(), [], SearchRequest(query='라벨'), client=FakeClient([tool('count_by_region', '{"bad":1}')]))
+
+
+def test_agent_explores_categories_and_other_regions_when_empty():
+    client = FakeClient([
+        tool('list_categories', '{"keyword":"상자"}'),
+        tool('search_companies', '{"query":"종이 상자","region":"제주시"}'),
+        tool('count_by_region', '{"query":"상자"}'),
+        final('{"company_ids":[],"questions":[],"summary":"서귀포에는 0곳, 제주시 한림읍에 1곳 있습니다."}'),
+    ])
+    result = run_agent(config(), demo_companies(), SearchRequest(query='상자', region='서귀포'), client=client)
+    assert [step['tool'] for step in result.trace] == ['list_categories', 'search_companies', 'count_by_region']
+    # 사용자가 정한 지역은 Agent가 바꾸지 못한다.
+    assert result.trace[0]['args']['region'] == '서귀포' and result.trace[0]['result']['matched_total'] == 0
+    assert result.trace[1]['args']['region'] == '서귀포' and result.trace[1]['result_ids'] == []
+    assert {'region': '제주시 한림읍', 'count': 1} in result.trace[2]['result']['regions']
+    assert result.hits == [] and '한림읍에 1곳' in result.summary
+    assert [t['function']['name'] for t in client.requests[0]['tools']] == ['list_categories', 'search_companies', 'count_by_region']
+
+
+def test_summary_with_numbers_not_in_tool_results_is_hidden():
+    client = FakeClient([tool(), final('{"company_ids":["demo-print"],"summary":"후보 37곳 중 최저가입니다."}')])
+    result = run_agent(config(), demo_companies(), SearchRequest(query='라벨'), client=client)
+    assert result.hits[0].company.id == 'demo-print'
+    assert result.summary == '' and result.trace[-1]['tool'] == 'summary_check'
 
 
 def test_unconfirmed_extraction_and_read_boundaries():
