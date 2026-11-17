@@ -37,6 +37,8 @@ Copy-Item .env.example .env
 
 테스트는 합성 데이터와 모의 API 응답을 사용합니다. 실제 외부 API와 원본 데이터 검증 결과는 [진행 기록](docs/PROGRESS.md)에 별도로 적습니다.
 
+테스트 실행 전 `requirements-dev.txt`도 설치합니다. 검증한 전체 패키지는 `requirements-lock.txt`에 고정했습니다. 로컬 의미 검색은 별도 설치 옵션이며 기본 실행에 필요하지 않습니다.
+
 ## 개발 방식
 
 실제 기능 단위로 커밋합니다. 새 커밋 10개마다 한 번 푸시합니다. 재배포가 승인되지 않은 원본·명세 파일, 키, 로컬 DB와 사용자 견적은 Git에 올리지 않습니다.
@@ -44,3 +46,6 @@ Copy-Item .env.example .env
 - [제품 기획](docs/PRODUCT.md)
 - [구현 계획](docs/IMPLEMENTATION.md)
 - [데이터 활용·이용조건](docs/DATA_USAGE.md)
+- [결과 설명과 검증 범위](docs/RESULTS.md)
+- [15쪽 기획서 목차](docs/PROPOSAL_OUTLINE.md)
+- [모델·API·오픈소스 명세](docs/THIRD_PARTY.md)

@@ -39,8 +39,10 @@ def calculate(quote: Quote, as_of: date | None = None) -> Comparison:
         if getattr(quote, field_name) is None:
             row.warnings.append(f'{label} 미확인')
     if not row.issues:
+        assert quote.unit_price is not None and quote.shipping is not None and quote.extra_cost is not None
         goods = quote.quantity * quote.unit_price
         if quote.tax_included is False:
+            assert quote.tax_rate is not None
             goods *= 1 + quote.tax_rate
         # 배송비·추가 비용은 사용자가 확인한 세금 포함 최종 금액으로 입력.
         row.total = (goods + quote.shipping + quote.extra_cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)

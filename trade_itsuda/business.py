@@ -20,7 +20,7 @@ def refresh_status(path, company: Company, config: Settings, *, now=None, post=N
     same_number = cached and cached['payload'] and cached['payload'].get('b_no') == company.business_number
     if same_number and cached['checked_at'] and now - datetime.fromisoformat(cached['checked_at']) < timedelta(hours=24):
         return cached
-    if cached and now - datetime.fromisoformat(cached['attempted_at']) < timedelta(minutes=5):
+    if cached and (same_number or not cached['payload']) and now - datetime.fromisoformat(cached['attempted_at']) < timedelta(minutes=5):
         return cached
     payload = cached['payload'] if same_number else None
     checked_at = cached['checked_at'] if same_number else None

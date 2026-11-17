@@ -2,6 +2,7 @@ import hashlib
 import io
 from datetime import date, datetime, timezone
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 import pandas as pd
 
@@ -23,18 +24,30 @@ def parse_file(content: bytes, filename: str, source_name: str, source_date: dat
     suffix = Path(filename).suffix.lower()
     if suffix == '.csv':
         try:
-            frame = pd.read_csv(io.BytesIO(content), encoding='utf-8-sig', dtype=str, keep_default_na=False)
+            frame = pd.read_csv(io.BytesIO(content), encoding='utf-8-sig', dtype=str, keep_default_na=False, header=None)
         except UnicodeDecodeError:
-            frame = pd.read_csv(io.BytesIO(content), encoding='cp949', dtype=str, keep_default_na=False)
+            frame = pd.read_csv(io.BytesIO(content), encoding='cp949', dtype=str, keep_default_na=False, header=None)
     elif suffix == '.xlsx':
-        frame = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, dtype=str, keep_default_na=False)
+        try:
+            with ZipFile(io.BytesIO(content)) as archive:
+                if sum(entry.file_size for entry in archive.infolist()) > 100 * 1024 * 1024:
+                    raise ValueError('XLSX 압축 해제 크기가 100MB를 초과합니다. 기업 표를 나눠 반입하세요.')
+            frame = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, dtype=str, keep_default_na=False, header=None)
+        except (BadZipFile, KeyError):
+            raise ValueError('올바른 XLSX 파일을 선택하세요.') from None
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError('XLSX 내용을 읽을 수 없습니다. 손상 여부와 시트를 확인하세요.') from None
     else:
         raise ValueError('CSV 또는 XLSX 기업 테이블을 선택하세요.')
-    if frame.empty or len(frame) > 100_000:
+    if len(frame) < 2 or len(frame) > 100_001:
         raise ValueError('기업 표는 1~100,000행이어야 합니다.')
-    frame.columns = [ALIASES.get(str(column).strip(), str(column).strip()) for column in frame.columns]
-    if frame.columns.duplicated().any():
+    columns = [ALIASES.get(str(column).strip(), str(column).strip()) for column in frame.iloc[0]]
+    if len(set(columns)) != len(columns):
         raise ValueError('동일 필드로 대응되는 열이 여러 개입니다. 중복 열을 확인하세요.')
+    frame = frame.iloc[1:].reset_index(drop=True)
+    frame.columns = pd.Index(columns)
     missing = {'name', 'industry', 'products', 'region'} - set(frame.columns)
     if missing:
         raise ValueError('실제 기업 테이블에 필요한 열이 없습니다: ' + ', '.join(sorted(missing)))
@@ -46,10 +59,11 @@ def parse_file(content: bytes, filename: str, source_name: str, source_date: dat
     for index, row in enumerate(frame.to_dict('records'), start=2):
         raw = {key: str(row.get(key, '')).strip() for key in
                ('name', 'industry', 'products', 'region', 'business_number', 'website')}
-        raw_date = source_date or str(row.get('source_date', '')).strip()
+        raw_date = str(row.get('source_date', '')).strip() or source_date or ''
         if isinstance(raw_date, str) and len(raw_date) == 8 and raw_date.isdigit():
             raw_date = f'{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}'
-        identity = str(row.get('id', '')).strip() or raw['business_number'] or f"{raw['name']}|{raw['region']}"
+        business_id = raw['business_number'].replace('-', '').replace(' ', '')
+        identity = str(row.get('id', '')).strip() or business_id or f"{raw['name']}|{raw['region']}"
         company_id = hashlib.sha256(f'{source_name}|{identity}'.encode()).hexdigest()[:24]
         if company_id in ids:
             raise ValueError(f'{index}행: 같은 기업 식별자가 반복됩니다. 행의 집계 단위를 확인하세요.')

@@ -66,7 +66,7 @@ def html_report(rows: list[Comparison], baseline_id: str, companies: list[Compan
             'td,th{border:1px solid #aaa;padding:8px}pre{white-space:pre-wrap}</style>'
             f'<h1>거래잇수다 견적 비교</h1><p>작성일 {today()} / 기준 업체 {escape(baseline)}</p>'
             '<p>총액 = 수량 × 단가 × (세금 별도이면 1 + 명시 세율) + 세금 포함 배송비 + 세금 포함 추가 비용. '
-            '소수 둘째 자리에서 반올림한 표시 금액이며, 실제 청구 시 반올림 방식은 업체에 확인해야 합니다. '
+            '소수 셋째 자리에서 반올림해 소수 둘째 자리까지 표시하며, 실제 청구 시 반올림 방식은 업체에 확인해야 합니다. '
             '차액은 후보 총액 − 기준 총액입니다. 품목·규격·단위·수량·통화가 같을 때만 차액을 계산합니다.</p>'
             '<table>' + table + '</table><h2>계산 입력값</h2>' + inputs + '<h2>기업 데이터 출처</h2><ul>' + ''.join(sources) + '</ul>'
             '<p>견적은 사용자 확인 자료입니다. 과거 기업 기록·관심 순위·국세청 사업자 상태는 현재 공급 능력이나 신뢰도를 보증하지 않습니다. '

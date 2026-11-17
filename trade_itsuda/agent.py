@@ -70,7 +70,9 @@ def run_agent(config: Settings, records: list[Company], request: SearchRequest, 
                     tool_request = SearchRequest.model_validate_json(call.function.arguments)
                 except ValueError:
                     raise AgentError('AI 검색 조건 형식이 잘못되었습니다. 기본 검색을 사용하세요.') from None
-                tool_request = tool_request.model_copy(update={'region': request.region, 'industry': request.industry, 'limit': min(request.limit, 5)})
+                tool_request = tool_request.model_copy(update={'region': request.region or tool_request.region,
+                                                               'industry': request.industry or tool_request.industry,
+                                                               'limit': min(request.limit, 5)})
                 hits = search(records, tool_request, encoder)
                 retrieved.update({hit.company.id: hit for hit in hits})
                 trace.append({'tool': 'search_companies', 'result_ids': [h.company.id for h in hits]})

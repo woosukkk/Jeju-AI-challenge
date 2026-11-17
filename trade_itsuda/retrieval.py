@@ -35,7 +35,7 @@ def load_encoder(model_path: str):
     if not Path(model_path).is_dir():
         raise ValueError('로컬 임베딩 모델 폴더가 없습니다. 기본 키워드 검색을 사용하세요.')
     try:
-        from sentence_transformers import SentenceTransformer
+        from sentence_transformers import SentenceTransformer  # ty: ignore[import-not-found]
     except ImportError:
         raise ValueError('의미 검색에는 requirements-semantic.txt 설치가 필요합니다.') from None
     return SentenceTransformer(model_path, device='cpu', local_files_only=True)

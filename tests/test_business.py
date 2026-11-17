@@ -32,6 +32,9 @@ def test_status_ttl_failure_keeps_success_and_key_not_stored(tmp_path):
     failed = refresh_status(path, company, config, now=now + timedelta(days=2), post=fail)
     assert failed['checked_at'] == first['checked_at']
     assert failed['error'] and 'private-nts-key' not in str(failed)
+    changed = company.model_copy(update={'business_number': '0000000001'})
+    result = refresh_status(path, changed, config, now=now + timedelta(days=2, seconds=10), post=post)
+    assert result['payload'] is None and result['checked_at'] is None
 
 
 def test_demo_and_external_disabled_never_call(tmp_path):

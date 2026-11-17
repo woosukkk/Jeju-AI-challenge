@@ -44,6 +44,10 @@ def test_grounded_agent_and_filter_lock():
     assert len(result.trace) == 1
     assert len(client.requests) == 2
     with pytest.raises(AgentError, match='근거'):
+        run_agent(config(), demo_companies(), SearchRequest(query='서귀포 라벨'),
+                  client=FakeClient([tool(arguments='{"query":"라벨","region":"서귀포"}'),
+                                     final('{"company_ids":["demo-print"]}')]))
+    with pytest.raises(AgentError, match='근거'):
         run_agent(config(), demo_companies(), SearchRequest(query='라벨', region='서귀포'),
                   client=FakeClient([tool(), final('{"company_ids":["demo-print"]}')]))
 

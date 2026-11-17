@@ -33,3 +33,19 @@ def test_import_rolls_back_all_rows_on_older_snapshot(tmp_path):
         import_companies(path, [new, older], b'bad', '합성')
     assert [record.id for record in companies(path)] == [original.id]
     assert len(import_history(path)) == 1
+
+
+def test_duplicate_headers_and_invalid_xlsx_rejected():
+    from trade_itsuda.ingest import parse_file
+    import pytest
+    with pytest.raises(ValueError, match='중복 열'):
+        parse_file('name,name,industry,products,region\n가,나,인쇄,라벨,제주'.encode(), 'a.csv', 'test')
+    with pytest.raises(ValueError, match='XLSX'):
+        parse_file(b'not-a-zip', 'a.xlsx', 'test')
+
+
+def test_file_date_takes_priority_over_fallback():
+    from datetime import date
+    from trade_itsuda.ingest import parse_file
+    raw = 'name,industry,products,region,source_date\n가상,인쇄,라벨,제주,2020-07-31'.encode()
+    assert parse_file(raw, 'a.csv', 'test', date(2026, 1, 1))[0].source_date == date(2020, 7, 31)
