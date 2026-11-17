@@ -6,6 +6,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 from pydantic import ValidationError
 
 from trade_itsuda import store
@@ -191,8 +192,16 @@ def go(step: int) -> None:
     st.rerun()
 
 
+notice: DeltaGenerator  # nav()가 매번 버튼 바 바로 위에 새로 만드는 알림 자리
+
+
 def nav(back: int | None, next_label: str | None, key: str) -> bool:
-    """화면 아래에 붙는 이전/다음 버튼 바. 이전은 바로 이동하고, 다음은 눌렸는지만 돌려준다(검증은 호출한 단계에서)."""
+    """화면 아래에 붙는 이전/다음 버튼 바. 이전은 바로 이동하고, 다음은 눌렸는지만 돌려준다(검증은 호출한 단계에서).
+
+    버튼을 누른 뒤의 오류·진행 표시는 `notice` 자리(버튼 바 바로 위)에 그린다. 그냥 그리면 화면 아래에 붙은 바 밑으로 숨는다.
+    """
+    global notice
+    notice = st.empty()
     with st.container(key=f'navbar_{key}'):
         left, right = st.columns([1, 1], vertical_alignment='center')
         with left:
@@ -311,9 +320,9 @@ def step_need() -> None:
         st.info('먼저 왼쪽 메뉴의 데이터 관리에서 기업 데이터를 가져오세요.')
     if nav(None, '다음: 지역 고르기', 'n1'):
         if not query.strip():
-            st.error('필요한 품목이나 서비스를 적어 주세요.')
+            notice.error('필요한 품목이나 서비스를 적어 주세요.')
         elif journey == JOURNEYS[1] and not existing.strip():
-            st.error('비교할 기존 거래처 이름을 적어 주세요.')
+            notice.error('비교할 기존 거래처 이름을 적어 주세요.')
         else:
             st.session_state.need = {'journey': journey, 'query': query.strip(), 'existing': existing.strip()}
             go(2)
@@ -341,11 +350,11 @@ def step_scope() -> None:
     if nav(1, '후보 찾기', 'n2'):
         st.session_state.scope = {'city': city, 'region': region, 'industry': industry, 'use_ai': use_ai, 'semantic': semantic}
         try:
-            with st.spinner('근거를 확인하며 찾는 중'):
+            with notice, st.spinner('근거를 확인하며 찾는 중'):
                 run_search()
             go(3)
         except (ValueError, OSError):
-            st.error('검색 조건 또는 로컬 모델을 확인하세요. 의미 검색을 끄고 다시 시도할 수 있습니다.')
+            notice.error('검색 조건 또는 로컬 모델을 확인하세요. 의미 검색을 끄고 다시 시도할 수 있습니다.')
 
 
 def step_candidates() -> None:
@@ -377,7 +386,7 @@ def step_candidates() -> None:
     st.caption('담은 후보: ' + (', '.join(names) if names else '아직 없음'))
     if nav(2, '다음: 문의 준비', 'n3'):
         if not state.shortlist:
-            st.error('비교할 후보를 1곳 이상 담아 주세요.')
+            notice.error('비교할 후보를 1곳 이상 담아 주세요.')
         else:
             go(4)
 
@@ -432,7 +441,7 @@ def step_inquiry() -> None:
                            'text/plain', key='download_inquiry_all')
     if nav(3, '다음: 받은 견적 입력', 'n4'):
         if not state.conditions:
-            st.error('요청 조건을 먼저 저장하세요. 다음 단계 견적 입력에 같은 조건을 채웁니다.')
+            notice.error('요청 조건을 먼저 저장하세요. 다음 단계 견적 입력에 같은 조건을 채웁니다.')
         else:
             go(5)
 
@@ -553,7 +562,7 @@ def step_quotes() -> None:
     st.caption('입력한 견적: ' + (', '.join(done) if done else '아직 없음'))
     if nav(4, '다음: 비교 결과 보기', 'n5'):
         if not state.flow_quotes:
-            st.error('견적을 1개 이상 저장하세요.')
+            notice.error('견적을 1개 이상 저장하세요.')
         else:
             go(6)
 
