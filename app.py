@@ -1,6 +1,8 @@
 from copy import deepcopy
 from datetime import date
 from decimal import Decimal
+from html import escape
+from urllib.parse import quote
 from uuid import uuid4
 
 import streamlit as st
@@ -22,6 +24,19 @@ STEPS = ['필요 품목', '지역', '후보 고르기', '문의 준비', '견적
 JOURNEYS = ['새 거래처 찾기', '기존 거래처와 비교']
 EXISTING = 'existing'
 OTHER = 'other'
+# 배경: 하늘빛 그라데이션 위에 겹친 오름(파랑) · 한라산 숲(초록) · 바다 물결을 벡터로 그린다.
+# SVG라 어떤 해상도에서도 선명하고, 화면 너비에 맞춰 늘거나 좁은 화면에서는 가운데를 기준으로 잘린다.
+BACKGROUND_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 360'>"
+    "<path d='M0 250C180 205 330 168 500 200C620 222 700 150 850 138C1010 126 1120 214 1260 206"
+    "C1350 201 1400 182 1440 172L1440 360L0 360Z' fill='#cfe0fb' fill-opacity='0.55'/>"
+    "<path d='M0 292C150 258 300 246 450 266C610 288 710 238 870 232C1050 226 1170 284 1440 256"
+    "L1440 360L0 360Z' fill='#cdebd9' fill-opacity='0.6'/>"
+    "<path d='M0 328C120 314 240 342 360 328S600 314 720 328S960 342 1080 328S1320 314 1440 328"
+    "L1440 360L0 360Z' fill='#b1cefb' fill-opacity='0.5'/>"
+    "<path d='M0 342C120 330 240 354 360 342S600 330 720 342S960 354 1080 342S1320 330 1440 342' "
+    "fill='none' stroke='#ffffff' stroke-opacity='0.75' stroke-width='2'/>"
+    "</svg>")
 
 st.set_page_config(page_title='거래잇수다', page_icon=':material/handshake:', layout='centered',
                    initial_sidebar_state='collapsed')
@@ -32,7 +47,7 @@ st.html('''<style>
 /* 앱 틀: Streamlit 기본 머리줄·메뉴·사이드바를 숨기고, 회색 바탕 위 가운데 흰 화면 카드로 보이게 한다. */
 [data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stSidebar"],
 [data-testid="stSidebarCollapsedControl"], footer { display: none !important; }
-.stApp { background: #f4f5f6; }
+[data-testid="stMain"], [data-testid="stBottom"] > div { background: transparent; }
 [data-testid="stMainBlockContainer"] { max-width: 960px; padding: 0 16px 48px; }
 /* Streamlit은 컨테이너를 stLayoutWrapper로 한 번 더 감싸므로 고정(sticky)은 그 바깥 틀에 건다. */
 [data-testid="stLayoutWrapper"]:has(> .st-key-appbar) { position: sticky; top: 0; z-index: 50; }
@@ -59,10 +74,13 @@ st.html('''<style>
 .tis-brand strong, .tis-brand small, .tis-status { white-space: nowrap; }
 [class*="st-key-navbar_"] [class*="_next"] { width: 100% !important; display: flex; justify-content: flex-end; }
 [class*="st-key-navbar_"] [class*="_next"] [data-testid="stButton"], [class*="st-key-navbar_"] [class*="_next"] button { width: auto !important; }
-.st-key-screen { background: #fff; border-radius: 20px; padding: 28px 32px 8px;
-  box-shadow: 0 1px 2px rgba(30, 33, 36, 0.06), 0 8px 24px rgba(30, 33, 36, 0.05); }
-[class*="st-key-navbar_"] { background: #fff; padding: 12px 0 16px;
-  margin-top: 8px; border-top: 1px solid #e6e8ea; }
+.st-key-screen { background: rgba(255, 255, 255, 0.93); backdrop-filter: blur(8px); border-radius: 20px;
+  padding: 28px 32px 8px; box-shadow: 0 1px 2px rgba(30, 33, 36, 0.06), 0 12px 32px rgba(30, 33, 36, 0.08); }
+[class*="st-key-navbar_"] { background: #fff; padding: 12px 0 16px; border-top: 1px solid #e6e8ea; }
+[data-testid="stLayoutWrapper"]:has(> [class*="st-key-navbar_"]) { background: #fff; margin-top: 8px; }
+/* 좁은 화면에서도 이전·다음 버튼은 한 줄에 둔다(Streamlit 기본은 열을 세로로 쌓음). */
+[class*="st-key-navbar_"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+[class*="st-key-navbar_"] [data-testid="stColumn"] { min-width: 0 !important; width: auto !important; flex: 1 1 0 !important; }
 @media (max-width: 640px) {
   .st-key-screen { padding: 20px 16px 4px; border-radius: 16px; }
   .tis-brand small, .tis-status { display: none; }
@@ -88,14 +106,32 @@ st.html('''<style>
   box-shadow: inset 0 0 0 1px #256ef4; }
 .st-key-w_journey div[role="radiogroup"] > div label { font-weight: 700; }
 @media (max-width: 640px) { .tis-steps .label { display: none; } }
-/* 제주 포인트: 카드·상자는 제주도청 누리집처럼 둥글게(16px), 버튼·입력칸은 KRDS 6px 유지.
-   AI가 만든 내용에만 제주 주황(#b34f00, 흰 배경 대비 약 7:1)을 쓴다. KRDS 강조색 규칙대로 화면의 5% 이하. */
-[class*="st-key-card_"], .st-key-ai_summary, .st-key-ai_advice, [data-testid="stExpander"] details { border-radius: 16px !important; }
-.st-key-ai_summary, .st-key-ai_advice { border-left: 4px solid #b34f00 !important; background: #fff8f2; }
+/* 글마다 상자를 두지 않는다. 구획은 제목·얇은 구분선·여백·왼쪽 세로선으로 나눈다. */
+[class*="st-key-card_"] { gap: 4px; padding: 18px 0 16px; border-bottom: 1px solid #e6e8ea; }
+.tis-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.tis-row-head strong { font-size: 1.15rem; color: #1e2124; }
+.tis-row-head span { font-size: 0.85rem; color: #6d7882; }
+.tis-row-note { margin: 2px 0 0; font-size: 0.8rem; color: #0b50d0; }
+.st-key-screen h4 { border-top: 1px solid #e6e8ea; padding-top: 20px; margin-top: 12px; }
+[data-testid="stAlertContainer"] { background: transparent !important; border-radius: 0 !important;
+  border-left: 3px solid currentColor; padding: 6px 0 6px 14px !important; }
+[data-testid="stExpander"] details { border-radius: 12px !important; border-color: #e6e8ea !important; }
+/* 제주 포인트: AI가 만든 내용에만 제주 주황(#b34f00, 흰 배경 대비 약 7:1) 세로선과 배지를 쓴다.
+   KRDS 강조색 규칙대로 화면의 5% 이하. */
+.st-key-ai_summary, .st-key-ai_advice { border-left: 3px solid #b34f00; padding: 2px 0 2px 16px; margin: 4px 0 8px; }
 .tis-ai-label { margin: 0; font-weight: 700; color: #1e2124; display: flex; align-items: center; gap: 8px; }
 .tis-ai { display: inline-block; background: #b34f00; color: #fff; font-size: 0.75rem; font-weight: 700;
   line-height: 1; padding: 4px 8px; border-radius: 999px; letter-spacing: 0.02em; }
 </style>''')
+# 배경은 화면(뷰포트) 크기를 기준으로 그린다: 그라데이션은 화면 전체, 오름·바다 그림은 화면 너비(최소 1100px)에 맞춰
+# 아래에 붙이고 스크롤해도 고정한다. 해상도와 상관없이 선명하도록 모두 CSS 그라데이션과 SVG(벡터)다.
+st.html('<style>.stApp { background-color: #f3f6fb; background-repeat: no-repeat; background-attachment: fixed;'
+        f' background-image: url("data:image/svg+xml,{quote(BACKGROUND_SVG)}"),'
+        ' radial-gradient(circle 38vmax at 92% 4%, rgba(255, 214, 170, 0.55), rgba(255, 214, 170, 0)),'
+        ' radial-gradient(circle 46vmax at 6% 0%, rgba(177, 206, 251, 0.6), rgba(177, 206, 251, 0)),'
+        ' linear-gradient(180deg, #eaf2fe 0%, #f5f8fc 55%, #eef6f1 100%);'
+        ' background-position: center bottom, 0 0, 0 0, 0 0;'
+        ' background-size: max(100%, 1100px) auto, 100% 100%, 100% 100%, 100% 100%; }</style>')
 try:
     config = settings()
     store.initialize(config.database_path)
@@ -195,13 +231,14 @@ def ai_label(title: str) -> None:
     st.html(f'<p class="tis-ai-label"><span class="tis-ai">AI</span>{title}</p>')
 
 
-def show_company(c: Company, prefix: str) -> None:
-    with st.container(border=True, key=f'card_{prefix}_{c.id}'):
-        st.subheader(c.name)
-        st.text(f'{c.industry} · {c.region}')
+def show_company(c: Company, prefix: str, note: str = '') -> None:
+    """업체 한 곳을 상자 없이 목록의 한 줄로 그린다. 줄과 줄 사이는 얇은 구분선으로 나눈다."""
+    with st.container(key=f'card_{prefix}_{c.id}'):
+        st.html(f'<div class="tis-row-head"><strong>{escape(c.name)}</strong>'
+                f'<span>{escape(c.industry)} · {escape(c.region)}</span></div>'
+                + (f'<p class="tis-row-note">{escape(note)}</p>' if note else ''))
         st.text('생산품 기록: ' + c.products)
-        st.caption(f'출처: {c.source_name} · 데이터 기준일: {c.source_date}')
-        st.caption('생산품·주소는 과거 기록입니다. 현재 공급 가능 여부와 연락처는 업체에 확인하세요.')
+        st.caption(f'출처: {c.source_name} · 데이터 기준일 {c.source_date} · 생산품·주소는 과거 기록이라 현재 공급 여부와 연락처는 업체에 확인하세요.')
         chosen = c.id in st.session_state.shortlist
         with st.container(horizontal=True):
             if st.button('상세 확인', key=f'{prefix}_view_{c.id}'):
@@ -320,7 +357,7 @@ def step_candidates() -> None:
     if state.search_note:
         st.warning(state.search_note)
     if state.summary:
-        with st.container(border=True, key='ai_summary'):
+        with st.container(key='ai_summary'):
             ai_label('Agent 탐색 요약')
             st.text(state.summary)
             st.caption('요약의 숫자는 Agent 도구가 이 PC의 데이터에서 센 값만 허용합니다. 판단은 아래 근거와 함께 확인하세요.')
@@ -335,8 +372,7 @@ def step_candidates() -> None:
         st.info('조건에 맞는 근거를 찾지 못했습니다. 이전 단계에서 지역을 넓히거나, 첫 단계에서 품목을 짧게 적어 보세요.')
     for hit in state.hits:
         if hit.company.id in by_id:
-            st.caption(hit.method + ' · ' + ' / '.join(hit.reasons))
-            show_company(by_id[hit.company.id], 'search')
+            show_company(by_id[hit.company.id], 'search', hit.method + ' · ' + ' / '.join(hit.reasons))
     names = [by_id[cid].name for cid in state.shortlist]
     st.caption('담은 후보: ' + (', '.join(names) if names else '아직 없음'))
     if nav(2, '다음: 문의 준비', 'n3'):
@@ -353,7 +389,7 @@ def step_inquiry() -> None:
     st.subheader('견적 요청 조건을 한 번만 적으세요')
     st.caption('적은 조건으로 업체마다 같은 양식의 문의 초안을 만들고, 다음 단계 견적 입력 칸에도 그대로 채웁니다. 자동 발송하지 않습니다.')
     st.caption('문의 대상: ' + ', '.join(name for _, name, _ in targets))
-    with st.form('conditions_form'):
+    with st.form('conditions_form', border=False):
         item = st.text_input('품목 (업체에 보낼 짧은 이름)', value=cond.get('item', ''), key='w_item',
                              placeholder=f"예: LED 간판 · 처음 적은 내용: {state.need['query']}")
         left, middle, right = st.columns(3)
@@ -418,7 +454,7 @@ def quote_form(target: str, name: str, saved_by_id: dict[str, Quote]) -> None:
         return container.text_input(label, value=str(default if value is None else value), key=f'{prefix}_{name}', help=help)
 
     # KRDS 신청서 작성 패턴: 필수 칸은 숨기지 않고 섹션 제목을 두며, 도움말은 화면 위가 아니라 입력 칸 옆(툴팁)에 둔다.
-    with st.form(f'quote_form_{target}'):
+    with st.form(f'quote_form_{target}', border=False):
         company_name = field(st, '업체명', 'company_name', name) if target == OTHER else name
         st.markdown('#### ① 요청 조건')
         st.caption('4단계에서 적은 조건을 채웠어요. 견적서 내용과 다르면 고쳐 주세요.')
@@ -493,7 +529,7 @@ def step_quotes() -> None:
         st.caption('기존 거래처 견적은 6단계에서 비교 기준이 됩니다.')
     with st.expander('견적서 텍스트·PDF가 있으면 AI가 칸을 채워 드려요'):
         st.caption('연락처·개인정보를 지우고 외부 전송 가능한 자료만 사용하세요. 채운 값은 반드시 원문과 대조하세요.')
-        with st.form('extract_form'):
+        with st.form('extract_form', border=False):
             upload = st.file_uploader('견적 파일 (선택)', type=['txt', 'pdf'], key='quote_file')
             text = st.text_area('또는 견적 원문 붙여넣기', key='quote_text', max_chars=20000)
             extract = st.form_submit_button('AI로 칸 채우기', key='extract_submit', disabled=not ai_ready)
@@ -560,7 +596,7 @@ def step_result() -> None:
                 st.error(str(error))
         if state.advice and state.advice[0] == advice_key:
             result = state.advice[1]
-            with st.container(border=True, key='ai_advice'):
+            with st.container(key='ai_advice'):
                 ai_label('비교 해설')
                 st.caption('숫자는 위 비교표 값만 허용합니다. 결정은 업체 확인 후 직접 하세요.')
                 st.text(result.summary)
@@ -589,8 +625,7 @@ def page_popular() -> None:
         c = by_id[rank['company_id']]
         if config.nts_key and config.allow_external_data and c.business_number:
             refresh_status(config.database_path, c, config)
-        st.caption(f'관심 {rank["interest_count"]}회 · 상세 보기 {rank["views"]}회 · 비교 선택 {rank["comparisons"]}회')
-        show_company(c, 'popular')
+        show_company(c, 'popular', f'관심 {rank["interest_count"]}회 · 상세 보기 {rank["views"]}회 · 비교 선택 {rank["comparisons"]}회')
     st.caption('사업자번호가 있는 업체만 이 화면을 여는 동안 캐시 주기에 따라 국세청 상태를 갱신합니다. 앱이 꺼져 있을 때나 생산품 정보는 자동 갱신하지 않습니다.')
 
 def page_data() -> None:
@@ -601,7 +636,7 @@ def page_data() -> None:
     st.caption('필수 열: name/기업명, industry/업종명, products/주요생산품, region/주소_읍면동. 데이터 기준일은 source_date/데이터 기준일 또는 아래 공통 기준일로 입력합니다.')
     st.caption('제주데이터허브 「제주특별자치도 상가(상권) 정보」 CSV는 그대로 가져올 수 있습니다. 상호명·상권업종중분류명을 업체명·업종으로, '
                '상권업종소분류명·표준산업분류명을 생산품으로, 시군구명·행정동명을 지역으로 씁니다. 파일에 기준일이 없으니 공통 기준일(수집일)을 입력하세요.')
-    with st.form('import_form'):
+    with st.form('import_form', border=False):
         upload = st.file_uploader('기업 데이터 CSV 또는 XLSX', type=['csv', 'xlsx'], key='company_file')
         source_name = st.text_input('정확한 데이터셋명·제공기관', key='source_name')
         source_date = st.text_input('공통 데이터 기준일 (파일에 없을 때만, YYYY-MM-DD)', key='source_date')

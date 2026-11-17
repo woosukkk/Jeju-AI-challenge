@@ -91,7 +91,8 @@ def test_wizard_from_need_to_comparison_without_keys(monkeypatch, tmp_path):
     at.button(key='n6_back').click().run()
     assert at.session_state['step'] == 5
     at.radio(key='page').set_value('최근 관심 업체').run()
-    assert any('관심 1회' in element.value for element in at.caption)
+    # 업체 줄 머리(상자 없는 목록 줄)에 관심 횟수가 붙는다.
+    assert any('관심 1회' in str(h.proto) for h in at.get('html'))
 
 
 def step_indicator(at) -> str:
