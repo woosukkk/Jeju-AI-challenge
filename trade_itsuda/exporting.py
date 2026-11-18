@@ -1,6 +1,7 @@
 import csv
 import html
 from io import StringIO
+from typing import Callable
 
 from .comparison import Comparison, today
 from .models import Company
@@ -49,7 +50,31 @@ def csv_report(rows: list[Comparison]) -> bytes:
     return ('\ufeff' + output.getvalue()).encode('utf-8')
 
 
-def html_report(rows: list[Comparison], baseline_id: str, companies: list[Company]) -> str:
+def search_section(search: dict | None, imports: list[dict] | None, escape: Callable[[object], str]) -> str:
+    """보고서의 '후보를 찾은 과정': 요청·조건·방식(모델)·Agent 단계·데이터 파일 해시. 같은 파일과 기록으로 다시 확인할 수 있게 한다."""
+    parts = []
+    if search:
+        rows = [('요청', search.get('request')), ('지역', search.get('region')), ('업종 조건', search.get('industry')),
+                ('찾은 방식', search.get('method')), ('찾은 시각', search.get('searched_at'))]
+        parts.append('<table>' + ''.join(f'<tr><th>{escape(k)}</th><td>{escape(v)}</td></tr>' for k, v in rows if v) + '</table>')
+        if search.get('steps'):
+            parts.append('<p>AI Agent가 수행한 단계</p><ol>' + ''.join(f'<li>{escape(step)}</li>' for step in search['steps']) + '</ol>')
+        if search.get('summary'):
+            parts.append(f'<p>Agent 요약(숫자는 도구 결과에 있는 값만 허용): {escape(search["summary"])}</p>')
+        if search.get('found'):
+            parts.append('<p>찾은 후보: ' + escape(', '.join(search['found'])) + '</p>')
+    if imports:
+        parts.append('<p>검색한 데이터 파일</p><ul>' + ''.join(
+            f'<li>{escape(i.get("source_name"))} / {escape(i.get("row_count"))}곳 / 가져온 시각 {escape(i.get("imported_at"))}'
+            f' / SHA-256 <code>{escape(i.get("sha256"))}</code></li>' for i in imports) + '</ul>')
+    if not parts:
+        return ''
+    return ('<h2>후보를 찾은 과정</h2>' + ''.join(parts)
+            + '<p>AI의 후보 선택과 문장은 모델·시점에 따라 달라질 수 있습니다. 숫자 계산은 AI가 아니라 코드가 합니다.</p>')
+
+
+def html_report(rows: list[Comparison], baseline_id: str, companies: list[Company], search: dict | None = None,
+                imports: list[dict] | None = None) -> str:
     if not rows or baseline_id not in {r.quote.id for r in rows}:
         raise ValueError('기준 견적을 포함한 비교 결과가 필요합니다.')
     escape = lambda value: html.escape(str(value), quote=True)
@@ -73,6 +98,6 @@ def html_report(rows: list[Comparison], baseline_id: str, companies: list[Compan
             '<p>총액 = 수량 × 단가 × (세금 별도이면 1 + 명시 세율) + 세금 포함 배송비 + 세금 포함 추가 비용. '
             '소수 셋째 자리에서 반올림해 소수 둘째 자리까지 표시하며, 실제 청구 시 반올림 방식은 업체에 확인해야 합니다. '
             '차액은 후보 총액 − 기준 총액입니다. 품목·규격·단위·수량·통화가 같을 때만 차액을 계산합니다.</p>'
-            '<table>' + table + '</table><h2>계산 입력값</h2>' + inputs + '<h2>기업 데이터 출처</h2><ul>' + ''.join(sources) + '</ul>'
+            '<table>' + table + '</table>' + search_section(search, imports, escape) + '<h2>계산 입력값</h2>' + inputs + '<h2>기업 데이터 출처</h2><ul>' + ''.join(sources) + '</ul>'
             '<p>견적은 사용자 확인 자료입니다. 과거 기업 기록·관심 순위·국세청 사업자 상태는 현재 공급 능력이나 신뢰도를 보증하지 않습니다. '
             '실제 품목·납기·연락처·거래 조건은 업체에 확인하세요. 이 보고서는 계약이나 거래 보증이 아닙니다.</p></html>')

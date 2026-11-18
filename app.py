@@ -1,5 +1,6 @@
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 import re
 from html import escape
@@ -196,11 +197,11 @@ ai_ready = bool(config.llm_key and config.allow_external_data)
 # 단계 사이에 유지할 값. 위젯 값은 화면을 떠나면 지워지므로 '다음'을 누를 때 여기에 옮겨 둔다.
 FLOW_DEFAULTS = {
     'step': 1,
-    'need': {'journey': JOURNEYS[0], 'query': '', 'existing': ''},
+    'need': {'journey': JOURNEYS[0], 'query': '', 'existing': '', 'answers': []},
     'scope': {'city': '전체', 'region': '전체', 'industry': '전체', 'use_ai': True, 'semantic': False},
     'hits': [], 'questions': [], 'trace': [], 'summary': '', 'search_note': '', 'searched': False,
     'shortlist': [], 'conditions': {}, 'drafts': {}, 'inquiry_note': '',
-    'flow_quotes': {}, 'extracted': {}, 'extraction_version': 0, 'advice': None,
+    'flow_quotes': {}, 'extracted': {}, 'extraction_version': 0, 'advice': None, 'search_log': {},
 }
 for key, value in {'session_id': str(uuid4()), 'flash': '', **deepcopy(FLOW_DEFAULTS)}.items():
     st.session_state.setdefault(key, value)
@@ -391,7 +392,15 @@ def run_search(on_step=None) -> None:
     """on_step: AI Agent가 도구를 쓸 때마다 단계 문장을 받는다(화면 실시간 표시)."""
     need, scope = st.session_state.need, st.session_state.scope
     region = scope['region'] if scope['region'] != '전체' else ('' if scope['city'] == '전체' else scope['city'])
-    request = SearchRequest(query=need['query'], region=region, industry='' if scope['industry'] == '전체' else scope['industry'])
+    # AI 확인 질문에 답했으면 그 답을 붙여 다시 찾는다. 질문 속 예시('예: 간판, 포스기…')는 검색어를 흐리므로 빼고,
+    # AI에는 '질문 → 답' 짝을, 키워드 검색에는 답만 붙인다.
+    pairs = need.get('answers') or []
+    use_agent = scope['use_ai'] and ai_ready
+    if pairs and use_agent:
+        query = need['query'] + ' / 사용자가 답한 추가 정보: ' + '; '.join(f'{q} → {a}' for q, a in pairs)
+    else:
+        query = ' '.join([need['query'], *(a for _, a in pairs)])
+    request = SearchRequest(query=query[:2000], region=region, industry='' if scope['industry'] == '전체' else scope['industry'])
     state = st.session_state
     state.hits, state.questions, state.trace, state.summary, state.search_note = [], [], [], '', ''
     encoder = encoder_at('models/e5') if scope['semantic'] else None
@@ -406,6 +415,31 @@ def run_search(on_step=None) -> None:
     else:
         state.hits = search(records, request, encoder)
     state.searched = True
+    # 보고서에 남길 검색 기록: 요청·조건·방식·Agent 단계(사람이 읽는 문장). 재현 확인용이며 원문 프롬프트는 남기지 않는다.
+    used_ai = bool(state.trace)
+    state.search_log = {
+        'request': request.query, 'region': request.region or '제주 전체', 'industry': request.industry or '전체',
+        'method': f'AI Agent ({config.provider} / {config.model})' if used_ai else '키워드 검색' + (' (AI 실패 후 대체)' if state.search_note else ''),
+        'steps': trace_lines(state.trace), 'summary': state.summary,
+        'found': [hit.company.name for hit in state.hits],
+        'searched_at': datetime.now(ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d %H:%M (한국 시간)'),
+    }
+
+
+def short_question(question: str) -> str:
+    """AI 질문에서 예시 목록('예: 간판, 포스기…')을 떼어 낸 짧은 질문. 예시 낱말이 검색어로 섞이지 않게 한다."""
+    return re.split(r'\s*\(?예[:)]', question)[0].strip().rstrip('?.').strip() or question
+
+
+def search_now(slot: DeltaGenerator) -> None:
+    """지금 조건으로 찾는다. AI Agent면 도구를 쓸 때마다 한 줄씩 slot에 보여 준다(5~15초 동안 무엇을 하는지 보이게)."""
+    if st.session_state.scope['use_ai'] and ai_ready:
+        with slot.container(), st.status('AI Agent가 데이터를 확인하며 찾는 중', expanded=True) as progress:
+            run_search(on_step=lambda line: progress.write('✓ ' + line))
+            progress.update(label='찾기 완료', state='complete')
+    else:
+        with slot, st.spinner('근거를 확인하며 찾는 중'):
+            run_search()
 
 
 def step_need() -> None:
@@ -420,14 +454,15 @@ def step_need() -> None:
         existing = st.text_input('지금 거래하는 업체 이름', value=need['existing'], max_chars=200, key='w_existing',
                                  help='검색 데이터에 없어도 됩니다. 5단계에서 이 업체의 견적을 비교 기준으로 씁니다.')
     if not records:
-        st.info('먼저 왼쪽 메뉴의 데이터 관리에서 기업 데이터를 가져오세요.')
+        st.info('검색할 기업 데이터가 아직 없습니다. 위쪽 메뉴의 "데이터 관리"에서 CSV를 가져오거나, '
+                '설치 폴더의 import_data.bat을 실행한 뒤 앱을 새로 고치세요.')
     if nav(None, '다음: 지역 고르기', 'n1'):
         if not query.strip():
             notice.error('필요한 품목이나 서비스를 적어 주세요.')
         elif journey == JOURNEYS[1] and not existing.strip():
             notice.error('비교할 기존 거래처 이름을 적어 주세요.')
         else:
-            st.session_state.need = {'journey': journey, 'query': query.strip(), 'existing': existing.strip()}
+            st.session_state.need = {'journey': journey, 'query': query.strip(), 'existing': existing.strip(), 'answers': []}
             go(2)
 
 
@@ -453,14 +488,7 @@ def step_scope() -> None:
     if nav(1, '후보 찾기', 'n2'):
         st.session_state.scope = {'city': city, 'region': region, 'industry': industry, 'use_ai': use_ai, 'semantic': semantic}
         try:
-            if use_ai and ai_ready:
-                # Agent가 도구를 쓸 때마다 한 줄씩 보여 준다. 5~15초를 기다리는 동안 무엇을 하는지 보이게 한다.
-                with notice.container(), st.status('AI Agent가 데이터를 확인하며 찾는 중', expanded=True) as progress:
-                    run_search(on_step=lambda line: progress.write('✓ ' + line))
-                    progress.update(label='찾기 완료', state='complete')
-            else:
-                with notice, st.spinner('근거를 확인하며 찾는 중'):
-                    run_search()
+            search_now(notice)
             go(3)
         except (ValueError, OSError):
             notice.error('검색 조건 또는 로컬 모델을 확인하세요. 의미 검색을 끄고 다시 시도할 수 있습니다.')
@@ -471,7 +499,8 @@ def step_candidates() -> None:
     scope = state.scope
     place = scope['region'] if scope['region'] != '전체' else scope['city']
     st.subheader('비교할 후보를 고르세요')
-    st.caption(f"'{state.need['query']}' · 지역 {place} · 최대 5곳까지 담을 수 있습니다.")
+    st.caption(f"'{state.need['query']}' · 지역 {place} · 최대 5곳까지 담을 수 있습니다."
+               + (' · 추가 정보: ' + ', '.join(a for _, a in state.need['answers']) if state.need.get('answers') else ''))
     if state.search_note:
         st.warning(state.search_note)
     if state.summary or state.trace:
@@ -484,10 +513,26 @@ def step_candidates() -> None:
             if steps:
                 st.html(f'<ol class="tis-trace" aria-label="Agent가 수행한 단계">{steps}</ol>')
             st.caption('요약의 숫자는 Agent 도구가 이 PC의 데이터에서 센 값만 허용합니다. 판단은 아래 근거와 함께 확인하세요.')
-    for question in state.questions:
-        st.text('추가로 확인할 점: ' + question)
+    if state.questions:
+        # AI가 요청이 모호하다고 본 점. 답하면 답을 붙여 다시 찾는다(한 번 묻고 끝나는 게 아니라 대화로 이어진다).
+        with st.form('answers_form', border=False):
+            body = form_section('sec_answers', 'AI가 더 묻는 것', '답하면 그 내용을 넣어 다시 찾아요. 모르는 질문은 비워 두세요.')
+            answers = [body.text_input(question, key=f'w_answer_{number}') for number, question in enumerate(state.questions)]
+            again = body.form_submit_button('답을 넣어 다시 찾기', key='reask', icon=':material/refresh:')
+        if again:
+            given = [[short_question(question), answer.strip()[:200]] for question, answer in zip(state.questions, answers) if answer.strip()]
+            if not given:
+                st.error('답을 하나 이상 적어 주세요.')
+            else:
+                state.need = {**state.need, 'answers': [*(state.need.get('answers') or []), *given][-6:]}
+                try:
+                    search_now(st.empty())
+                    st.rerun()
+                except (ValueError, OSError):
+                    st.error('다시 찾지 못했습니다. 조건을 확인하세요.')
     if state.searched and not state.hits:
-        st.info('조건에 맞는 근거를 찾지 못했습니다. 이전 단계에서 지역을 넓히거나, 첫 단계에서 품목을 짧게 적어 보세요.')
+        st.info('아직 후보가 없습니다. 위 AI 질문에 답하면 그 내용을 넣어 다시 찾아요.' if state.questions else
+                '조건에 맞는 근거를 찾지 못했습니다. 이전 단계에서 지역을 넓히거나, 첫 단계에서 품목을 짧게 적어 보세요.')
     shown = [by_id[hit.company.id] for hit in state.hits if hit.company.id in by_id]
     common = source_line(shown)
     if common:
@@ -779,7 +824,9 @@ def step_result() -> None:
             st.dataframe(display_table(rows), hide_index=True, alt='견적 총액과 비교 제한 조건')
             st.caption('차액 = 후보 총액 − 기준 총액. 조건이 다르거나 비용이 미확인인 견적은 차액 비교에서 제외합니다.')
         with st.container(horizontal=True):
-            st.download_button('비교 보고서 (HTML)', html_report(rows, baseline_id, records), '거래잇수다_비교.html', 'text/html', key='download_html')
+            st.download_button('비교 보고서 (HTML)', html_report(rows, baseline_id, records, state.search_log or None,
+                                                               store.import_history(config.database_path)),
+                               '거래잇수다_비교.html', 'text/html', key='download_html')
             st.download_button('비교표 (CSV)', csv_report(rows), '거래잇수다_비교.csv', 'text/csv', key='download_csv')
         # 견적 내용이나 기준이 바뀌면 이전 해설을 보여주지 않는다.
         advice_key = repr((table, baseline_id))

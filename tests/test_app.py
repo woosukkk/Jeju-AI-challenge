@@ -124,3 +124,22 @@ def test_empty_popularity(monkeypatch, tmp_path):
     at = app(monkeypatch, tmp_path)
     at.radio(key='page').set_value('최근 관심 업체').run()
     assert any('아직 집계된' in element.value for element in at.info)
+
+
+def test_answers_to_ai_questions_search_again(monkeypatch, tmp_path):
+    at = with_demo(monkeypatch, tmp_path)
+    at.text_input(key='w_query').set_value('라벨')
+    at.button(key='n1_next').click().run()
+    at.button(key='n2_next').click().run()
+    assert at.session_state['step'] == 3
+    # 키 없는 테스트에서는 AI가 질문을 만들지 않으므로, Agent가 돌려준 질문을 넣고 화면을 다시 그린다.
+    at.session_state['questions'] = ['라벨 크기는 어떻게 되나요? 예: 30mm, 50mm']
+    at.run()
+    at.button(key='reask').click().run()
+    assert any('하나 이상' in e.value for e in at.error)  # 빈 답으로는 다시 찾지 않는다.
+    at.text_input(key='w_answer_0').set_value('50mm 원형')
+    at.button(key='reask').click().run()
+    assert not at.exception
+    assert at.session_state['need']['answers'] == [['라벨 크기는 어떻게 되나요', '50mm 원형']]
+    # 키워드 검색에는 질문 문장 없이 답만 붙인다.
+    assert at.session_state['search_log']['request'] == '라벨 50mm 원형' and at.session_state['search_log']['method'] == '키워드 검색'
