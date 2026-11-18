@@ -128,9 +128,10 @@ st.html('''<style>
 .tis-pill { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #ecf2fe; color: #0b50d0;
   font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
 /* Agent가 실제로 한 일: 화살표로 이어진 단계 */
-.tis-trace { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 8px; padding: 0; margin: 8px 0 4px; }
-.tis-trace li { font-size: 0.82rem; color: #1e2124; background: #fff8f2; border: 1px solid #f3d9c4; border-radius: 999px; padding: 4px 10px; }
-.tis-trace li + li::before { content: "→"; color: #b34f00; margin: 0 6px 0 -2px; }
+.tis-trace { list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 6px; padding: 0; margin: 10px 0 4px; }
+.tis-trace li { counter-increment: step; display: flex; align-items: baseline; gap: 8px; font-size: 0.85rem; color: #1e2124; }
+.tis-trace li::before { content: counter(step); flex: none; width: 20px; height: 20px; border-radius: 50%; background: #b34f00; color: #fff;
+  font-size: 0.72rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; transform: translateY(-1px); }
 .tis-source { font-size: 0.8rem; color: #6d7882; margin: 4px 0 0; }
 /* 6단계 결론: 업체별 총액 카드 */
 .tis-verdict { font-size: 1.05rem; margin: 4px 0 12px; }
@@ -153,6 +154,9 @@ st.html('''<style>
 .tis-checks { margin: 6px 0 10px; padding-left: 0; list-style: none; }
 .tis-checks li { margin: 2px 0; }
 .tis-checks li::before { content: "☐ "; color: #b34f00; }
+/* 직접 그린 목록은 Streamlit 기본 들여쓰기를 쓰지 않는다(본문 왼쪽 선에 맞춘다). */
+:is(.tis-saved, .tis-trace, .tis-checks, .tis-card ul) { margin-left: 0 !important; padding-left: 0 !important; }
+:is(.tis-saved, .tis-trace, .tis-checks, .tis-card ul) > li { margin-left: 0 !important; }
 /* 5단계: 업체별 저장 상태 */
 .tis-saved { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
 .tis-saved li { font-size: 0.8rem; padding: 3px 10px; border-radius: 999px; background: #f4f5f6; color: #6d7882; }
@@ -324,12 +328,13 @@ def show_company(c: Company, prefix: str, note: str = '', show_source: bool = Tr
             if st.button('상세 확인', key=f'{prefix}_view_{c.id}'):
                 record_event(config.database_path, c.id, st.session_state.session_id, 'view')
                 st.session_state['detail'] = c.id
-            if st.button('✓ 담음 · 빼기' if chosen else '비교에 담기', key=f'{prefix}_add_{c.id}', type='secondary' if chosen else 'primary',
-                         help='다시 누르면 비교 후보에서 뺍니다.' if chosen else None):
-                if chosen:
+            # 담기·빼기는 서로 다른 버튼(키)이다. 같은 키로 번갈아 쓰면 빠른 두 번 클릭이 '담고 바로 빼기'가 된다.
+            if chosen:
+                if st.button('✓ 담음 · 빼기', key=f'{prefix}_drop_{c.id}', help='누르면 비교 후보에서 뺍니다.'):
                     st.session_state.shortlist.remove(c.id)
                     st.rerun()
-                elif len(st.session_state.shortlist) >= 5:
+            elif st.button('비교에 담기', key=f'{prefix}_add_{c.id}', type='primary'):
+                if len(st.session_state.shortlist) >= 5:
                     st.error('후보는 최대 5곳까지 담을 수 있습니다.')
                 else:
                     st.session_state.shortlist.append(c.id)
