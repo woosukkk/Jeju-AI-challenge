@@ -137,6 +137,9 @@ def test_summary_with_numbers_not_in_tool_results_is_hidden():
     result = run_agent(config(), demo_companies(), SearchRequest(query='라벨'), client=client)
     assert result.hits[0].company.id == 'demo-print'
     assert result.summary == '' and result.trace[-1]['tool'] == 'summary_check'
+    # 검색이 돌려준 업체 수는 허용한다(데모 '라벨' 검색은 1곳).
+    client = FakeClient([tool(), final('{"company_ids":["A"],"summary":"라벨 검색에서 후보 1곳을 찾았습니다."}')])
+    assert run_agent(config(), demo_companies(), SearchRequest(query='라벨'), client=client).summary
 
 
 TABLE = [{'업체': '기존상회', '총액': '110000.00', '기준 대비 차액': '0.00', '비교 제한': ''},

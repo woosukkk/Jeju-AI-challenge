@@ -133,6 +133,9 @@ def run_agent(config: Settings, records: list[Company], request: SearchRequest, 
                     payload = run_tool(call.function.name, call.function.arguments, records, request, encoder, retrieved, trace)
                     content = json.dumps(payload, ensure_ascii=False)
                     outputs.append(content)
+                    if isinstance(payload, list):
+                        # '후보 5곳'처럼 검색이 돌려준 업체 수도 도구 결과의 사실이다.
+                        outputs.append(str(len(payload)))
                 messages.append(dict(role='tool', tool_call_id=call.id, content=content))
             force_final = calls >= MAX_TOOL_CALLS
         else:
