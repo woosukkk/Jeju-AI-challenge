@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from trade_itsuda import store
 from trade_itsuda.agent import (AgentError, explain_comparison, extract_quote, inquiry_questions, quote_text, run_agent,
                                 trace_lines)
-from trade_itsuda.business import refresh_status
+from trade_itsuda.business import lookup_status, refresh_status
 from trade_itsuda.comparison import Comparison, compare
 from trade_itsuda.config import settings
 from trade_itsuda.exporting import csv_report, html_report, inquiry, rows_for_export
@@ -129,6 +129,8 @@ st.html('''<style>
 [data-testid="stExpander"] [data-testid="stExpanderDetails"] { padding-left: 0 !important; padding-right: 0 !important; }
 /* 제주 포인트: AI가 만든 내용에만 제주 주황(#b34f00, 흰 배경 대비 약 7:1) 세로선과 배지를 쓴다.
    KRDS 강조색 규칙대로 화면의 5% 이하. */
+/* 문의 초안: 코드 상자 대신 읽기 쉬운 본문 글꼴로 */
+[data-testid="stCode"] pre, [data-testid="stCode"] code { font-family: inherit !important; font-size: 0.95rem !important; line-height: 1.7 !important; }
 .st-key-ai_summary, .st-key-ai_advice, .st-key-ai_extract_note { border-left: 3px solid #b34f00; padding: 2px 0 2px 16px; margin: 4px 0 8px; }
 .tis-ai-label { margin: 0; font-weight: 700; color: #1e2124; display: flex; align-items: center; gap: 8px; }
 .tis-ai { display: inline-block; background: #b34f00; color: #fff; font-size: 0.75rem; font-weight: 700;
@@ -163,6 +165,7 @@ st.html('''<style>
 .tis-badge.cheaper { background: #e5f4e4; color: #1a6b2c; }
 .tis-badge.pricier { background: #fbebeb; color: #b42318; }
 .tis-badge.blocked { background: #f9eeda; color: #7a5200; }
+.tis-nts { margin: 8px 0 0; font-size: 0.8rem; color: #464c53; }
 .tis-card ul { margin: 10px 0 0; padding: 0; list-style: none; font-size: 0.8rem; color: #464c53; }
 .tis-card li::before { content: "☐ "; color: #9e6a00; }
 .tis-ai-cols h5 { font-size: 0.9rem; margin: 0 0 4px; }
@@ -192,7 +195,7 @@ try:
 except (ValueError, OSError):
     st.error('환경 설정 또는 데이터 폴더를 확인하세요. README의 설치 절차를 참고하세요.')
     st.stop()
-ai_ready = bool(config.llm_key and config.allow_external_data)
+ai_configured = bool(config.llm_key and config.allow_external_data)
 
 # 단계 사이에 유지할 값. 위젯 값은 화면을 떠나면 지워지므로 '다음'을 누를 때 여기에 옮겨 둔다.
 FLOW_DEFAULTS = {
@@ -201,14 +204,23 @@ FLOW_DEFAULTS = {
     'scope': {'city': '전체', 'region': '전체', 'industry': '전체', 'use_ai': True, 'semantic': False},
     'hits': [], 'questions': [], 'trace': [], 'summary': '', 'search_note': '', 'searched': False,
     'shortlist': [], 'conditions': {}, 'drafts': {}, 'inquiry_note': '',
-    'flow_quotes': {}, 'extracted': {}, 'extraction_version': 0, 'advice': None, 'search_log': {},
+    'flow_quotes': {}, 'extracted': {}, 'extraction_version': 0, 'advice': None, 'search_log': {}, 'nts': {},
 }
-for key, value in {'session_id': str(uuid4()), 'flash': '', **deepcopy(FLOW_DEFAULTS)}.items():
+for key, value in {'session_id': str(uuid4()), 'flash': '', 'ai_used': 0, **deepcopy(FLOW_DEFAULTS)}.items():
     st.session_state.setdefault(key, value)
+# 비용 관리: 세션당 AI 작업 수 한도. 다 쓰면 AI 기능을 끄고 키워드 검색·직접 입력으로 이어간다('처음부터'로 초기화되지 않음).
+ai_limit_reached = ai_configured and st.session_state.ai_used >= config.ai_session_limit
+ai_ready = ai_configured and not ai_limit_reached
 
 
-@st.cache_data(max_entries=2)
-def load_companies(path: str, version: int):
+def count_ai(times: int = 1) -> None:
+    st.session_state.ai_used += times
+
+
+@st.cache_resource(max_entries=2)
+def load_companies(path: str, version: int) -> list[Company]:
+    # cache_data는 클릭(재실행)마다 5만 7천 곳을 복사(unpickle, 개발 PC 약 0.9초)한다. 목록은 고치지 않으므로 한 벌을 함께 쓴다.
+    # version(파일 수정 시각)이 바뀌면 새로 읽는다.
     return store.companies(path)
 
 
@@ -232,7 +244,7 @@ with st.container(key='appbar'):
     with status:
         dot = '#228738' if ai_ready else '#9e6a00'
         st.html(f'<div class="tis-status"><span class="count">업체 <b>{len(records):,}</b>곳</span>'
-                f'<span class="tis-dot" style="background:{dot}"></span>AI {"켜짐" if ai_ready else "꺼짐"}</div>')
+                f'<span class="tis-dot" style="background:{dot}"></span>AI {"켜짐" if ai_ready else "한도 도달" if ai_limit_reached else "꺼짐"}</div>')
 if st.session_state.flash:
     st.toast(st.session_state.flash, icon=':material/check_circle:')
     st.session_state.flash = ''
@@ -406,6 +418,7 @@ def run_search(on_step=None) -> None:
     encoder = encoder_at('models/e5') if scope['semantic'] else None
     if scope['use_ai'] and ai_ready:
         try:
+            count_ai()
             result = run_agent(config, records, request, encoder, on_step=on_step)
             state.hits, state.questions, state.trace, state.summary = result.hits, result.questions, result.trace, result.summary
         except AgentError as error:
@@ -477,7 +490,9 @@ def step_scope() -> None:
                           index=regions.index(scope['region']) if scope['region'] in regions else 0)
     use_ai = st.toggle('AI Agent가 업종 분류와 지역 분포를 확인하며 찾기', value=scope['use_ai'] and ai_ready,
                        disabled=not ai_ready, key='w_ai')
-    if not ai_ready:
+    if ai_limit_reached:
+        st.caption(f'이 화면에서 AI를 {config.ai_session_limit}번 써서 한도에 닿았습니다(비용 관리). 지금은 키워드 검색으로 찾습니다.')
+    elif not ai_ready:
         st.caption('AI Agent를 쓰려면 API 키와 외부 전송 허용 설정이 필요합니다. 지금은 키워드 검색으로 찾습니다.')
     with st.expander('업종을 알고 있다면 (선택)'):
         industries = ['전체'] + sorted({c.industry for c in records})
@@ -576,6 +591,9 @@ def step_inquiry() -> None:
                 questions: list[str] = []
                 if use_ai:
                     try:
+                        if st.session_state.ai_used >= config.ai_session_limit:
+                            raise AgentError('이 세션의 AI 사용 한도에 닿았습니다.')
+                        count_ai()
                         with st.spinner(f'{name} 확인 질문을 만드는 중'):
                             questions = inquiry_questions(config, {'item': item, 'specification': spec, 'quantity': quantity,
                                                                    'unit': unit, 'notes': notes}, company)
@@ -594,7 +612,8 @@ def step_inquiry() -> None:
         names = {key: name for key, name, _ in targets}
         for tab, (key, text) in zip(st.tabs([names[key] for key in drafts]), drafts.items()):
             with tab:
-                st.text(text)
+                # 오른쪽 위 복사 버튼으로 문자·메일에 바로 붙여 넣는다.
+                st.code(text, language=None, wrap_lines=True)
                 st.download_button('이 초안 다운로드', text, f'거래잇수다_문의_{names[key]}.txt', 'text/plain', key=f'download_inquiry_{key}')
         st.download_button('초안 모두 한 파일로 받기', '\n\n----------\n\n'.join(drafts.values()), '거래잇수다_문의_전체.txt',
                            'text/plain', key='download_inquiry_all')
@@ -716,6 +735,23 @@ def step_quotes() -> None:
     st.html(f'<ul class="tis-saved" aria-label="업체별 견적 저장 상태">{chips}</ul>')
     if target == EXISTING:
         st.caption('기존 거래처 견적은 6단계에서 비교 기준이 됩니다.')
+    nts_ready = bool(config.nts_key and config.allow_external_data)
+    with st.expander('사업자 상태 확인 (선택) · 국세청'):
+        st.caption('사업자번호를 알면 국세청에서 계속·휴업·폐업 여부를 확인해 6단계 비교에 함께 보여 줘요. '
+                   '상태가 품질·납품 능력을 보증하지는 않습니다.' + ('' if nts_ready else ' 국세청 API 키가 없어 지금은 쓸 수 없습니다.'))
+        with st.form(f'nts_form_{target}', border=False):
+            number = st.text_input('사업자번호', key=f'nts_no_{target}', placeholder='123-45-67890')
+            check = st.form_submit_button('국세청 상태 확인', key=f'nts_check_{target}', disabled=not nts_ready)
+        if check:
+            try:
+                with st.spinner('국세청에 확인하는 중'):
+                    state.nts[target] = lookup_status(number, config)
+            except ValueError as error:
+                st.error(str(error))
+        if target in state.nts:
+            found = state.nts[target]
+            closed = f" · 폐업일 {found['end_dt']}" if found.get('end_dt') else ''
+            st.text(f"{found['b_no'][:3]}-{found['b_no'][3:5]}-{found['b_no'][5:]} → {found['label']}{closed}")
     # 견적서가 있으면 붙여넣기가 가장 빠르다: 아직 저장·추출하지 않은 업체에서는 펼쳐 둔다.
     first_time = ai_ready and target not in state.flow_quotes and state.extracted.get('target') != target
     with st.expander('견적서가 있으면 붙여넣으세요 · AI가 아래 칸을 채워요', expanded=first_time):
@@ -727,6 +763,7 @@ def step_quotes() -> None:
         if extract:
             try:
                 raw = quote_text(upload.getvalue(), upload.name) if upload else text
+                count_ai()
                 with st.spinner('견적 추출 중'):
                     draft = extract_quote(config, raw)
                 state.extracted = {'target': target, 'values': draft.model_dump(mode='json', exclude_none=True)}
@@ -757,7 +794,7 @@ def display_table(rows: list[Comparison]) -> list[dict]:
     return [{k: v for k, v in row.items() if k not in empty} for row in table]
 
 
-def result_cards(rows: list[Comparison], baseline_id: str) -> None:
+def result_cards(rows: list[Comparison], baseline_id: str, statuses: dict[str, dict] | None = None) -> None:
     """6단계 결론: 한 줄 요약 + 업체별 총액 카드(기준·더 싼 곳·비싼 곳·계산 불가 배지, 아직 모르는 것)."""
     base = next(r for r in rows if r.quote.id == baseline_id)
     cheaper = [r for r in rows if r.difference is not None and r.difference < 0]
@@ -768,8 +805,10 @@ def result_cards(rows: list[Comparison], baseline_id: str) -> None:
                    f'기준({escape(base.quote.company_name)})보다 <b>{won(-best.difference, best.quote.currency)}</b> 저렴합니다.')
     elif any(r.difference is not None for r in rows if r is not base):
         verdict = f'같은 조건으로 비교한 후보 중 기준({escape(base.quote.company_name)})보다 싼 곳은 없습니다.'
+    elif len(rows) == 1:
+        verdict = '견적이 하나뿐입니다. 5단계에서 다른 업체 견적을 하나 더 저장하면 차액을 계산합니다.'
     else:
-        verdict = '아직 같은 조건으로 금액을 비교할 수 있는 후보가 없습니다. 카드의 사유를 확인하세요.'
+        verdict = '아직 같은 조건으로 금액을 비교할 수 있는 후보가 없습니다. 각 열의 사유를 확인하세요.'
     best_id = min(cheaper, key=lambda r: r.total or 0).quote.id if cheaper else None
     cards = []
     for r in [base] + [r for r in rows if r is not base]:
@@ -790,6 +829,9 @@ def result_cards(rows: list[Comparison], baseline_id: str) -> None:
                  else '<div class="total unknown">총액 미확정</div>')
         notes = [escape(issue) for issue in r.issues] + [escape(w.replace(' 미확인', '')) + ' 확인' for w in r.warnings]
         listing = f'<ul>{"".join(f"<li>{n}</li>" for n in notes)}</ul>' if notes else ''
+        status = (statuses or {}).get(r.quote.id)
+        if status:
+            listing += f'<p class="tis-nts">국세청: {escape(status["label"])} ({escape(status["checked_at"][:10])} 확인)</p>'
         kind = 'base' if r is base else 'best' if r.quote.id == best_id else ''
         cards.append(f'<div class="tis-card {kind}"><div class="name">{escape(r.quote.company_name)}</div>'
                      f'{total}{badge}{listing}</div>')
@@ -819,7 +861,8 @@ def step_result() -> None:
                                    format_func=lambda qid: saved_by_id[qid].company_name, key='baseline_id')
         rows = compare([saved_by_id[qid] for qid in selected], baseline_id)
         table = rows_for_export(rows)  # AI 해설·CSV에는 계산 원래 값을 쓴다.
-        result_cards(rows, baseline_id)
+        statuses = {qid: state.nts[key] for key, qid in state.flow_quotes.items() if key in state.nts}
+        result_cards(rows, baseline_id, statuses)
         with st.expander('자세한 비교표 보기'):
             st.dataframe(display_table(rows), hide_index=True, alt='견적 총액과 비교 제한 조건')
             st.caption('차액 = 후보 총액 − 기준 총액. 조건이 다르거나 비용이 미확인인 견적은 차액 비교에서 제외합니다.')
@@ -832,6 +875,7 @@ def step_result() -> None:
         advice_key = repr((table, baseline_id))
         if st.button('AI 비교 해설 받기', key='explain_compare', disabled=not ai_ready):
             try:
+                count_ai()
                 with st.spinner('비교표를 해설하는 중'):
                     state.advice = (advice_key, explain_comparison(config, table, saved_by_id[baseline_id].company_name))
             except AgentError as error:
@@ -877,7 +921,8 @@ def page_popular() -> None:
 
 def page_data() -> None:
     st.subheader('기업 데이터 가져오기')
-    st.caption(f'AI 설정: {config.provider} / {config.model}' + ('' if ai_ready else ' · API 키 또는 외부 전송 허용이 없어 AI가 꺼져 있습니다')
+    st.caption(f'AI 설정: {config.provider} / {config.model} · 이 세션 AI 사용 {st.session_state.ai_used}/{config.ai_session_limit}회'
+               + ('' if ai_configured else ' · API 키 또는 외부 전송 허용이 없어 AI가 꺼져 있습니다')
                + ' · 이 PC 한 사람용입니다. 공용 PC에서는 사용 후 견적을 삭제하세요.')
     st.info('명세서가 아닌 실제 기업 행이 필요합니다. 원본 반출·가공·외부 전송 허용 여부는 각각 확인해야 합니다.')
     st.caption('필수 열: name/기업명, industry/업종명, products/주요생산품, region/주소_읍면동. 데이터 기준일은 source_date/데이터 기준일 또는 아래 공통 기준일로 입력합니다.')

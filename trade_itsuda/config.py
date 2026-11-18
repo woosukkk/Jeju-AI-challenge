@@ -13,6 +13,9 @@ class Settings:
     llm_key: str = field(repr=False)
     nts_key: str = field(repr=False)
     allow_external_data: bool = False
+    # 한 사용자(브라우저 세션)가 쓸 수 있는 AI 작업 수(검색·문의 질문 업체 1곳·견적 추출·비교 해설을 각각 1회로 센다).
+    # 넘으면 키워드 검색·직접 입력으로 이어간다. 0이면 AI를 쓰지 않는다.
+    ai_session_limit: int = 30
 
 
 def settings() -> Settings:
@@ -30,4 +33,15 @@ def settings() -> Settings:
         llm_key=os.getenv('GEMINI_API_KEY' if provider == 'gemini' else 'OPENAI_API_KEY', ''),
         nts_key=os.getenv('NTS_API_KEY', ''),
         allow_external_data=os.getenv('ALLOW_EXTERNAL_DATA', 'false').lower() == 'true',
+        ai_session_limit=session_limit(os.getenv('AI_SESSION_LIMIT', '30')),
     )
+
+
+def session_limit(value: str) -> int:
+    try:
+        limit = int(value.strip())
+    except ValueError:
+        raise ValueError('AI_SESSION_LIMIT는 0 이상의 정수여야 합니다.') from None
+    if limit < 0:
+        raise ValueError('AI_SESSION_LIMIT는 0 이상의 정수여야 합니다.')
+    return limit

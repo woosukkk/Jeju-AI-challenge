@@ -143,3 +143,55 @@ def test_answers_to_ai_questions_search_again(monkeypatch, tmp_path):
     assert at.session_state['need']['answers'] == [['라벨 크기는 어떻게 되나요', '50mm 원형']]
     # 키워드 검색에는 질문 문장 없이 답만 붙인다.
     assert at.session_state['search_log']['request'] == '라벨 50mm 원형' and at.session_state['search_log']['method'] == '키워드 검색'
+
+
+def test_ai_limit_falls_back_to_keyword_search(monkeypatch, tmp_path):
+    # 키가 있어도 세션 한도(0)에 닿으면 AI를 부르지 않고 키워드 검색으로 이어간다(네트워크 호출 없음).
+    monkeypatch.setenv('AI_SESSION_LIMIT', '0')
+    at = with_demo(monkeypatch, tmp_path)
+    monkeypatch.setenv('OPENAI_API_KEY', 'not-a-real-key')
+    monkeypatch.setenv('ALLOW_EXTERNAL_DATA', 'true')
+    at.run()
+    assert any('한도 도달' in str(h.proto) for h in at.get('html'))
+    at.text_input(key='w_query').set_value('라벨')
+    at.button(key='n1_next').click().run()
+    assert at.toggle(key='w_ai').disabled and any('한도' in c.value for c in at.caption)
+    at.button(key='n2_next').click().run()
+    assert at.session_state['step'] == 3 and at.session_state['search_log']['method'] == '키워드 검색'
+    assert at.session_state['ai_used'] == 0
+
+
+def test_ai_session_limit_setting():
+    import pytest
+    from trade_itsuda.config import session_limit
+    assert session_limit('30') == 30 and session_limit(' 0 ') == 0
+    for bad in ['-1', 'many']:
+        with pytest.raises(ValueError):
+            session_limit(bad)
+
+
+def test_quote_for_a_company_outside_the_candidates(monkeypatch, tmp_path):
+    # '+ 다른 업체': 검색 후보가 아닌 업체의 견적도 이름을 직접 적어 저장하고 비교에 넣는다.
+    at = with_demo(monkeypatch, tmp_path)
+    at.text_input(key='w_query').set_value('라벨')
+    at.button(key='n1_next').click().run()
+    at.button(key='n2_next').click().run()
+    at.button(key='search_add_demo-print').click().run()
+    at.button(key='n3_next').click().run()
+    at.text_input(key='w_item').set_value('라벨')
+    at.text_input(key='w_spec').set_value('50mm')
+    at.text_input(key='w_quantity').set_value('100')
+    at.button(key='create_inquiry').click().run()
+    at.button(key='n4_next').click().run()
+    save_quote(at, '10')  # 첫 업체(가상 한라라벨)
+    at.radio(key='w_quote_target').set_value('+ 다른 업체').run()
+    fill(at, {'업체명': '가상 동문상회'})
+    save_quote(at, '9')
+    saved = {q.company_name: q for q in store.quotes(tmp_path / 'app.sqlite3')}
+    assert set(saved) == {'가상 한라라벨', '가상 동문상회'}
+    assert saved['가상 동문상회'].company_id.startswith('manual-')
+    assert any(key.startswith('other-') for key in at.session_state['flow_quotes'])
+    assert '가상 동문상회' in at.radio(key='w_quote_target').options  # 저장 뒤에는 선택지에 이름으로 나온다.
+    at.button(key='n5_next').click().run()
+    table = at.dataframe[0].value
+    assert table.loc[table['업체'] == '가상 동문상회', '기준 대비 차액'].iloc[0] == '-100원'
