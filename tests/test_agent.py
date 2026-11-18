@@ -199,3 +199,10 @@ def test_search_results_use_short_letters_and_miscopied_ids_are_blocked():
     with pytest.raises(AgentError, match='근거'):  # 번호와 실제 ID로 같은 업체를 두 번 고를 수 없다.
         run_agent(config(), demo_companies(), SearchRequest(query='라벨'),
                   client=FakeClient([tool(), final('{"company_ids":["A","demo-print"]}')]))
+
+
+def test_progress_callback_gets_one_line_per_tool_call():
+    lines: list[str] = []
+    client = FakeClient([tool('list_categories', '{"keyword":"라벨"}'), tool(), final('{"company_ids":["A"]}')])
+    run_agent(config(), demo_companies(), SearchRequest(query='라벨'), client=client, on_step=lines.append)
+    assert len(lines) == 2 and lines[0].startswith('업종 분류 확인') and lines[1].startswith('업체 검색')

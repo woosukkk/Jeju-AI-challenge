@@ -3,7 +3,7 @@ import re
 import time
 from dataclasses import dataclass
 from io import BytesIO
-from typing import TypeVar
+from typing import Callable, TypeVar
 
 from openai import OpenAI
 from pydantic import Field
@@ -99,7 +99,9 @@ def complete(client, config, messages, *, retry_wait: float = 2.0, **kwargs):
     raise AgentError('LLM 요청에 실패했습니다.')
 
 
-def run_agent(config: Settings, records: list[Company], request: SearchRequest, encoder=None, client=None) -> AgentResult:
+def run_agent(config: Settings, records: list[Company], request: SearchRequest, encoder=None, client=None,
+              on_step: Callable[[str], None] | None = None) -> AgentResult:
+    """on_step: 도구를 한 번 쓸 때마다 사람이 읽을 단계 문장을 받는다(화면의 실시간 진행 표시용)."""
     # 주입된 테스트 클라이언트에도 외부 전송 권한 검사를 동일하게 적용.
     if not config.allow_external_data:
         raise AgentError('외부 전송이 꺼져 있습니다. 기본 검색을 사용하세요.')
@@ -136,6 +138,8 @@ def run_agent(config: Settings, records: list[Company], request: SearchRequest, 
                     if isinstance(payload, list):
                         # '후보 5곳'처럼 검색이 돌려준 업체 수도 도구 결과의 사실이다.
                         outputs.append(str(len(payload)))
+                    if on_step is not None and trace:
+                        on_step(trace_lines(trace[-1:])[0])
                 messages.append(dict(role='tool', tool_call_id=call.id, content=content))
             force_final = calls >= MAX_TOOL_CALLS
         else:
