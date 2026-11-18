@@ -206,3 +206,12 @@ def test_progress_callback_gets_one_line_per_tool_call():
     client = FakeClient([tool('list_categories', '{"keyword":"라벨"}'), tool(), final('{"company_ids":["A"]}')])
     run_agent(config(), demo_companies(), SearchRequest(query='라벨'), client=client, on_step=lines.append)
     assert len(lines) == 2 and lines[0].startswith('업종 분류 확인') and lines[1].startswith('업체 검색')
+
+
+def test_extraction_accepts_korean_currency_words():
+    # OpenAI 실호출에서 통화가 '원'으로 와서 추출 전체가 실패했던 사례.
+    raw = '{"item":"LED 간판","unit_price":650000,"currency":"원","tax_included":false,"tax_rate":0.1}'
+    assert extract_quote(config(), '견적', client=FakeClient([final(raw)])).currency == 'KRW'
+    raw = '{"item":"LED 간판","currency":"금화"}'
+    result = extract_quote(config(), '견적', client=FakeClient([final(raw)]))
+    assert result.currency is None and result.item == 'LED 간판'  # 모르는 표기는 비우고 나머지는 살린다.

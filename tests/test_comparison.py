@@ -32,3 +32,7 @@ def test_comparison_same_conditions_only():
     assert rows[2].difference is None
     assert '수량' in rows[2].issues[0]
     assert compare([quote(shipping=None), quote(id='b')], 'a')[1].difference is None
+
+
+def test_quote_currency_words_become_codes():
+    assert quote(currency='원').currency == 'KRW' and quote(currency='usd').currency == 'USD'

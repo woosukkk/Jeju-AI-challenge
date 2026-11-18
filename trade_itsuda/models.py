@@ -46,6 +46,19 @@ class SearchRequest(Record):
     limit: int = Field(default=5, ge=1, le=10)
 
 
+# 견적서·사용자가 흔히 쓰는 통화 표기를 ISO 코드로 바꾼다. 2026-11-18 OpenAI 추출에서 '원'이 나와 추출 전체가 실패한 일이 있었다.
+CURRENCY_WORDS = {'원': 'KRW', '₩': 'KRW', '원화': 'KRW', 'won': 'KRW', '달러': 'USD', '$': 'USD', '미국 달러': 'USD',
+                  '엔': 'JPY', '¥': 'JPY', '엔화': 'JPY', '위안': 'CNY', '유로': 'EUR', '€': 'EUR'}
+
+
+def currency_code(value):
+    """통화 표기를 3자리 대문자 코드로 정리한다. 모르는 표기는 그대로 돌려 검증에서 걸러지게 한다."""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    return CURRENCY_WORDS.get(text.lower(), CURRENCY_WORDS.get(text, text.upper() if text.isascii() else text))
+
+
 class Quote(Record):
     id: str = Field(min_length=1, max_length=160)
     company_id: str = Field(min_length=1, max_length=160)
@@ -66,6 +79,11 @@ class Quote(Record):
     valid_until: date | None = None
     source_name: str = Field(default='사용자 입력', min_length=1, max_length=300)
     confirmed: bool = False
+
+    @field_validator('currency', mode='before')
+    @classmethod
+    def currency_words(cls, value):
+        return currency_code(value)
 
     @field_validator('valid_until')
     @classmethod
@@ -93,9 +111,11 @@ class QuoteExtraction(Record):
     issued_at: date | None = None
     valid_until: date | None = None
 
-    @field_validator('currency')
+    @field_validator('currency', mode='before')
     @classmethod
     def currency_format(cls, value):
-        if value is not None and (len(value) != 3 or not value.isascii() or not value.isupper()):
-            raise ValueError('통화는 KRW 등 3자리 대문자여야 합니다.')
+        # 추출 초안에서는 통화 하나 때문에 전체를 버리지 않는다: 알 수 없는 표기는 비워 두고 사용자가 채운다.
+        value = currency_code(value)
+        if value is not None and (not isinstance(value, str) or len(value) != 3 or not value.isascii() or not value.isupper()):
+            return None
         return value
