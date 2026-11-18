@@ -180,3 +180,19 @@ def test_unconfirmed_extraction_and_read_boundaries():
     assert quote_text('견적'.encode(), 'a.txt') == '견적'
     with pytest.raises(AgentError):
         quote_text(b'bad', 'a.exe')
+
+
+def test_search_results_use_short_letters_and_miscopied_ids_are_blocked():
+    # OpenAI 실호출에서 24자 업체 ID를 한 글자 틀리게 옮겨 적은 사례: 짧은 후보 번호(A, B…)로 고르게 한다.
+    import json
+    client = FakeClient([tool(), tool(), final('{"company_ids":["A"],"questions":[]}')])
+    result = run_agent(config(), demo_companies(), SearchRequest(query='라벨'), client=client)
+    assert result.hits[0].company.id == 'demo-print'
+    shown = json.loads(client.requests[1]['messages'][-1]['content'])
+    assert [row['id'] for row in shown] == ['A']  # 같은 업체는 다시 검색해도 같은 번호를 받는다.
+    with pytest.raises(AgentError, match='근거'):
+        run_agent(config(), demo_companies(), SearchRequest(query='라벨'),
+                  client=FakeClient([tool(), final('{"company_ids":["demo-prinT"]}')]))
+    with pytest.raises(AgentError, match='근거'):  # 번호와 실제 ID로 같은 업체를 두 번 고를 수 없다.
+        run_agent(config(), demo_companies(), SearchRequest(query='라벨'),
+                  client=FakeClient([tool(), final('{"company_ids":["A","demo-print"]}')]))
