@@ -15,7 +15,7 @@ Copy-Item .env.example .env
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-키는 `.env`에만 설정합니다. `LLM_PROVIDER=openai` 또는 `gemini`를 선택하고 해당 공급자의 키를 넣습니다. 국세청 상태조회에는 별도의 `NTS_API_KEY`가 필요합니다. 기업·견적 자료의 외부 LLM 전송은 기본적으로 꺼져 있습니다. 승인된 자료일 때만 `ALLOW_EXTERNAL_DATA=true`로 설정합니다. 상세한 실행·데이터 반입 절차는 [사용자 매뉴얼](docs/MANUAL.md)을 참고하세요.
+키는 `.env`에만 설정합니다. `LLM_PROVIDER=openai`(기본, 권장) 또는 `gemini`를 선택하고 해당 공급자의 키를 넣습니다. AI를 켜려면 `ALLOW_EXTERNAL_DATA=true`도 설정합니다. 국세청 상태조회에는 별도의 `NTS_API_KEY`가 필요합니다. 기업·견적 자료의 외부 LLM 전송은 기본적으로 꺼져 있습니다. 승인된 자료일 때만 `ALLOW_EXTERNAL_DATA=true`로 설정합니다. 상세한 실행·데이터 반입 절차는 [사용자 매뉴얼](docs/MANUAL.md)을 참고하세요.
 
 필수 제주 데이터는 제주데이터허브 「제주특별자치도 상가(상권) 정보」(2025-09-18 수집, 57,347곳)입니다. 원천 공공데이터포털의 이용허락범위는 "제한 없음"이지만 저장소에는 CSV·DB를 넣지 않습니다. 이용조건과 열 대응은 [데이터 활용 명세](docs/DATA_USAGE.md)에 있습니다. 데모 업체 4곳은 전부 가상입니다.
 
