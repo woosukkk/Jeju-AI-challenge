@@ -102,7 +102,7 @@ st.html('''<style>
 .tis-steps .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .tis-step-count { font-size: 0.82rem; color: #6d7882; margin: 0; }
 .st-key-w_journey div[role="radiogroup"] { gap: 16px; flex-wrap: wrap; }
-.st-key-w_journey div[role="radiogroup"] > div { flex: 1 1 240px; padding: 16px 20px; border: 1px solid #cdd1d5;
+.st-key-w_journey div[role="radiogroup"] > div { flex: 1 1 240px; padding: 16px 20px; border: 1px solid #e6e8ea;
   border-radius: 16px; background: #fff; margin: 0; cursor: pointer; }
 .st-key-w_journey div[role="radiogroup"] > div:has(input:checked) { border-color: #256ef4; background: #ecf2fe;
   box-shadow: inset 0 0 0 1px #256ef4; }
@@ -114,10 +114,18 @@ st.html('''<style>
 .tis-row-head strong { font-size: 1.15rem; color: #1e2124; }
 .tis-row-head span { font-size: 0.85rem; color: #6d7882; }
 .tis-row-note { margin: 2px 0 0; font-size: 0.8rem; color: #0b50d0; }
-.st-key-screen h4 { border-top: 1px solid #e6e8ea; padding-top: 20px; margin-top: 12px; }
+/* 상자 없는 구획(설정 화면 방식): 왼쪽 제목 열 + 오른쪽 입력, 구획 사이는 가는 선 한 줄 */
+[class*="st-key-sec_"] { border-top: 1px solid #e6e8ea; padding: 18px 0 6px; }
+.tis-sec-title { font-weight: 700; color: #1e2124; margin: 0 0 4px; font-size: 1rem; }
+.tis-sec-note { font-size: 0.8rem; color: #6d7882; margin: 0; line-height: 1.5; }
+@media (max-width: 640px) { [class*="st-key-sec_"] [data-testid="stHorizontalBlock"] { gap: 12px !important; } }
 [data-testid="stAlertContainer"] { background: transparent !important; border-radius: 0 !important;
   border-left: 3px solid currentColor; padding: 6px 0 6px 14px !important; }
-[data-testid="stExpander"] details { border-radius: 12px !important; border-color: #e6e8ea !important; }
+/* 펼침 영역은 상자 대신 글자만 있는 '› 열기' 줄로 보이게 한다. */
+[data-testid="stExpander"] details { border: none !important; border-radius: 0 !important; background: transparent !important; }
+[data-testid="stExpander"] summary { padding-left: 0 !important; color: #0b50d0; background: transparent !important; }
+[data-testid="stExpander"] summary:hover { color: #083891; }
+[data-testid="stExpander"] [data-testid="stExpanderDetails"] { padding-left: 0 !important; padding-right: 0 !important; }
 /* 제주 포인트: AI가 만든 내용에만 제주 주황(#b34f00, 흰 배경 대비 약 7:1) 세로선과 배지를 쓴다.
    KRDS 강조색 규칙대로 화면의 5% 이하. */
 .st-key-ai_summary, .st-key-ai_advice, .st-key-ai_extract_note { border-left: 3px solid #b34f00; padding: 2px 0 2px 16px; margin: 4px 0 8px; }
@@ -136,10 +144,16 @@ st.html('''<style>
 /* 6단계 결론: 업체별 총액 카드 */
 .tis-verdict { font-size: 1.05rem; margin: 4px 0 12px; }
 .tis-verdict b { color: #228738; }
-.tis-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 4px 0 8px; }
-.tis-card { border: 1px solid #e6e8ea; border-radius: 16px; padding: 16px 18px; background: #fff; }
-.tis-card.base { border-color: #cdd1d5; background: #f8f9fa; }
-.tis-card.best { border-color: #228738; box-shadow: inset 0 0 0 1px #228738; }
+.tis-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0; margin: 8px 0 12px;
+  border-top: 1px solid #e6e8ea; border-bottom: 1px solid #e6e8ea; }
+/* 카드 상자 대신 세로 가는 선으로 나눈 숫자 열. 가장 싼 곳은 테두리 대신 초록 숫자로 강조한다. */
+.tis-card { padding: 16px 20px; border-left: 1px solid #e6e8ea; }
+.tis-card:first-child { border-left: none; padding-left: 0; }
+.tis-card.best .total { color: #1a7f37; }
+@media (max-width: 640px) {
+  .tis-card { border-left: none; padding-left: 0; border-top: 1px solid #e6e8ea; }
+  .tis-card:first-child { border-top: none; }
+}
 .tis-card .name { font-weight: 700; color: #1e2124; }
 .tis-card .total { font-size: 1.6rem; font-weight: 800; color: #1e2124; margin: 6px 0; letter-spacing: -0.01em; }
 .tis-card .total.unknown { font-size: 1.05rem; color: #6d7882; font-weight: 700; }
@@ -263,6 +277,17 @@ def header(step: int) -> None:
                      f'<span class="label">{name}</span>{note}</li>')
     st.html(f'<p class="tis-step-count">{len(STEPS)}단계 중 {step}단계 · {STEPS[step - 1]}</p>'
             f'<ol class="tis-steps" aria-label="진행 단계">{"".join(items)}</ol>')
+
+
+def form_section(key: str, title: str, note: str = '') -> DeltaGenerator:
+    """상자 없는 구획: 왼쪽에 제목·설명, 오른쪽에 입력. 구획 사이는 가는 선 한 줄(설정 화면 방식).
+
+    좁은 화면에서는 Streamlit이 두 열을 위아래로 쌓아 제목이 입력 위로 온다. 오른쪽 열을 돌려준다.
+    """
+    with st.container(key=key):
+        left, right = st.columns([1, 3], gap='large')
+        left.html(f'<p class="tis-sec-title">{escape(title)}</p>' + (f'<p class="tis-sec-note">{escape(note)}</p>' if note else ''))
+    return right
 
 
 def flow_targets() -> list[tuple[str, str, Company | None]]:
@@ -483,18 +508,20 @@ def step_inquiry() -> None:
     cond = state.conditions
     targets = flow_targets()
     st.subheader('견적 요청 조건을 한 번만 적으세요')
-    st.caption('적은 조건으로 업체마다 같은 양식의 문의 초안을 만들고, 다음 단계 견적 입력 칸에도 그대로 채웁니다. 자동 발송하지 않습니다.')
+    st.caption('초안은 자동으로 보내지 않습니다. 내려받거나 복사해 직접 보내세요.')
     st.caption('문의 대상: ' + ', '.join(name for _, name, _ in targets))
     with st.form('conditions_form', border=False):
-        item = st.text_input('품목 (업체에 보낼 짧은 이름)', value=cond.get('item', ''), key='w_item',
-                             placeholder=f"예: LED 간판 · 처음 적은 내용: {state.need['query']}")
-        left, middle, right = st.columns(3)
+        body = form_section('sec_c1', '보낼 조건', '업체마다 같은 조건으로 묻고, 5단계 견적 칸에도 그대로 채웁니다.')
+        item = body.text_input('품목 (업체에 보낼 짧은 이름)', value=cond.get('item', ''), key='w_item',
+                               placeholder=f"예: LED 간판 · 처음 적은 내용: {state.need['query']}")
+        left, middle, right = body.columns(3)
         spec = left.text_input('규격', value=cond.get('specification', ''), key='w_spec', placeholder='예: 1200x600 LED')
         quantity = middle.text_input('수량', value=cond.get('quantity', ''), key='w_quantity', placeholder='예: 500')
         unit = right.text_input('단위', value=cond.get('unit', '개'), key='w_unit')
-        notes = st.text_area('추가 요청 (희망 납기, 설치·배송 여부 등)', value=cond.get('notes', ''), key='w_notes')
-        use_ai = st.checkbox('AI가 업체의 등록 업종·생산품을 보고 확인 질문을 덧붙이기', value=ai_ready, disabled=not ai_ready, key='w_inquiry_ai')
-        create = st.form_submit_button('조건 저장하고 문의 초안 만들기', type='primary', key='create_inquiry')
+        notes = body.text_area('추가 요청 (희망 납기, 설치·배송 여부 등)', value=cond.get('notes', ''), key='w_notes')
+        body = form_section('sec_c2', 'AI 확인 질문', '업체의 등록 업종에 맞춰 꼭 물어볼 점을 덧붙여요.')
+        use_ai = body.checkbox('AI가 업체의 등록 업종·생산품을 보고 확인 질문을 덧붙이기', value=ai_ready, disabled=not ai_ready, key='w_inquiry_ai')
+        create = body.form_submit_button('조건 저장하고 문의 초안 만들기', type='primary', key='create_inquiry')
     if create:
         try:
             if Decimal(quantity) <= 0 or not Decimal(quantity).is_finite():
@@ -568,17 +595,15 @@ def quote_form(target: str, name: str, saved_by_id: dict[str, Quote]) -> None:
 
     # KRDS 신청서 작성 패턴: 필수 칸은 숨기지 않고 섹션 제목을 두며, 도움말은 화면 위가 아니라 입력 칸 옆(툴팁)에 둔다.
     with st.form(f'quote_form_{target}', border=False):
-        company_name = field(st, '업체명', 'company_name', name) if target == OTHER else name
-        st.markdown('#### ① 요청 조건')
-        st.caption('4단계에서 적은 조건을 채웠어요. 견적서 내용과 다르면 고쳐 주세요.')
-        a, b, c, d = st.columns([2, 2, 1, 1])
+        body = form_section(f'sec_q1_{prefix}', '요청 조건', '4단계에서 적은 조건을 채웠어요. 견적서와 다르면 고쳐 주세요.')
+        company_name = field(body, '업체명', 'company_name', name) if target == OTHER else name
+        a, b, c, d = body.columns([2, 2, 1, 1])
         item = field(a, '품목', 'item')
         specification = field(b, '규격', 'specification', help='크기·재질·색 등 업체가 견적에 적은 사양')
         quantity = field(c, '수량', 'quantity')
         unit = field(d, '단위', 'unit', help='개, 박스, 장, m² 처럼 수량을 세는 단위')
-        st.markdown('#### ② 금액')
-        st.caption('모르는 금액은 빈칸으로 두세요. 0은 무료로 확인된 경우에만 넣어요.')
-        a, b, c = st.columns(3)
+        body = form_section(f'sec_q2_{prefix}', '금액', '모르는 금액은 빈칸으로 두세요. 0은 무료로 확인된 경우에만 넣어요.')
+        a, b, c = body.columns(3)
         unit_price = field(a, '단가', 'unit_price', help='단위 1개당 가격. 견적서의 숫자만 넣어요(쉼표 없이).')
         tax_options = ['미확인', '포함', '별도']
         tax = b.selectbox('단가에 부가세 포함?', tax_options, key=f'{prefix}_tax',
@@ -586,20 +611,22 @@ def quote_form(target: str, name: str, saved_by_id: dict[str, Quote]) -> None:
                           help='견적서에 "부가세 포함"이면 포함, "부가세 별도"이면 별도를 고르세요.')
         tax_rate = c.text_input('별도 세율 (%)', key=f'{prefix}_rate', help='부가세 별도일 때만 넣어요. 보통 10',
                                 value=str(Decimal(str(seed['tax_rate'])) * 100) if seed.get('tax_rate') is not None else '')
-        a, b, c = st.columns(3)
+        a, b, c = body.columns(3)
         shipping = field(a, '배송비 (세금 포함)', 'shipping', help='세금까지 더한 최종 배송비. 무료로 확인됐으면 0, 모르면 빈칸')
         extra_cost = field(b, '추가 비용 (세금 포함)', 'extra_cost', help='설치비·디자인비 등 단가 밖의 비용 합계. 없으면 0, 모르면 빈칸')
         currency = field(c, '통화', 'currency', 'KRW', help='원화는 KRW')
-        st.markdown('#### ③ 거래 조건과 근거')
-        a, b, c, d = st.columns(4)
+        body = form_section(f'sec_q3_{prefix}', '거래 조건과 근거', '납기·유효기간을 알면 비교표에 함께 표시돼요.')
+        a, b = body.columns(2)
         minimum_order = field(a, '최소 주문 수량', 'minimum_order', help='업체가 받는 가장 적은 주문량. 요청 수량보다 크면 비교표에 표시돼요.')
         lead_days = field(b, '납기 (일)', 'lead_days', help='주문 후 받기까지 걸리는 날 수')
-        issued_at = field(c, '견적 발행일 (YYYY-MM-DD)', 'issued_at')
-        valid_until = field(d, '유효기간 (YYYY-MM-DD)', 'valid_until', help='이 날짜가 지나면 견적 가격이 바뀔 수 있어요.')
-        source_name = field(st, '견적 근거 (견적서 파일명·담당자 회신일 등)', 'source_name', '사용자 입력',
+        a, b = body.columns(2)
+        issued_at = field(a, '견적 발행일 (YYYY-MM-DD)', 'issued_at')
+        valid_until = field(b, '유효기간 (YYYY-MM-DD)', 'valid_until', help='이 날짜가 지나면 견적 가격이 바뀔 수 있어요.')
+        source_name = field(body, '견적 근거 (견적서 파일명·담당자 회신일 등)', 'source_name', '사용자 입력',
                             help='나중에 다시 확인할 수 있게 견적을 받은 경로를 적어요.')
-        confirmed = st.checkbox('견적서 원문과 대조해 입력값을 확인했습니다', value=bool(seed.get('confirmed', False)), key=f'{prefix}_confirmed')
-        save = st.form_submit_button('이 업체 견적 저장', type='primary', key='save_quote')
+        body = form_section(f'sec_q4_{prefix}', '확인하고 저장', '저장한 견적만 6단계 비교에 들어가요.')
+        confirmed = body.checkbox('견적서 원문과 대조해 입력값을 확인했습니다', value=bool(seed.get('confirmed', False)), key=f'{prefix}_confirmed')
+        save = body.form_submit_button('이 업체 견적 저장', type='primary', key='save_quote')
     if save:
         try:
             qid = existing_id if existing_id in saved_by_id else str(uuid4())
