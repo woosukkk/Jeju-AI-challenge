@@ -42,7 +42,7 @@
 | 기업 파일 반입 | CSV/XLSX, 출처·기준일, 해시, 중복·구버전 차단, 트랜잭션 | 실제 상가 CSV 57,347곳 반입 확인. `import_data.bat` 명령줄 반입도 같은 결과 |
 | 거래처 검색 | 지역/업종 필터 + 키워드 근거 | 실제 데이터 12개 질의 측정(scripts/measure_search.py), 오검색 3종 수정 |
 | 의미 검색 | 로컬 E5 CPU 연결 코드 | 패키지·실모델 미탑재, 실제 속도·품질 미검증 |
-| LLM 검색 Agent | OpenAI/Gemini 호환 클라이언트, 도구 호출, 조회 ID 검증 | Gemini `gemini-3.5-flash-lite` 실호출 성공. 무료 키 연속 실행 시 429. OpenAI 미검증 |
+| LLM 검색 Agent | OpenAI/Gemini 호환 클라이언트, 도구 호출, 조회 ID 검증 | Gemini `gemini-3.5-flash-lite`·OpenAI `gpt-5.4-mini` 실호출 성공. 무료 Gemini 키는 연속 실행 시 429. 후보는 A, B… 번호로 고른다 |
 | 견적 AI 추출 | 텍스트/텍스트 PDF → 미확인 값 null 초안 | Gemini 실호출로 가상 견적 추출 성공. 스캔 OCR·다품목 추출 미지원 |
 | 견적 비교 | 기존 업체 직접 입력, 후보 선택, CRUD, Decimal 계산 | 합성 견적·화면 테스트 통과 |
 | 국세청 상태 | 24시간 캐시, 실패 시 이전 성공 시각 유지 | 모의 API 검증. 실키 조회 미검증. 상가 데이터에는 사업자번호가 없어 연결 안 됨 |
@@ -51,7 +51,7 @@
 | UI·설치 | 6단계 진행형 화면(KRDS·제주 배경), setup/import_data/run 배치 | 새 폴더 ZIP 설치→반입→실행→검색 확인(개발 PC). 센터 PC 미검증 |
 | 기획서·ZIP | 기획서 초안(Claude 문서), `scripts/make_submission.py` | 최종 기획서·최종 ZIP은 아직 없음 |
 
-2026-11-17 기준 검증은 **pytest 44 passed / ty 통과 / pip check 통과**다. 실행 중인 앱은 분리한 가상 DB로 10회 화면 상태를 확인했다. 실제 API·실데이터 검증은 [결과 설명](RESULTS.md)에 따로 적었고, 센터 PC 검증은 아직 없다. 문서만 바꿀 때 이 수치를 새로 테스트한 결과로 쓰지 않는다.
+2026-11-18 기준 검증은 **pytest 45 passed / ty 통과 / pip check 통과**다. 실행 중인 앱은 분리한 가상 DB로 10회 화면 상태를 확인했다. 실제 API·실데이터 검증은 [결과 설명](RESULTS.md)에 따로 적었고, 센터 PC 검증은 아직 없다. 문서만 바꿀 때 이 수치를 새로 테스트한 결과로 쓰지 않는다.
 
 ## 코드 위치
 
