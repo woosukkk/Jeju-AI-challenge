@@ -16,8 +16,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from trade_itsuda import store  # noqa: E402
+from trade_itsuda import agent  # noqa: E402
 from trade_itsuda.agent import AgentError, run_agent  # noqa: E402
-from trade_itsuda.config import settings  # noqa: E402
+from trade_itsuda.config import Settings, settings  # noqa: E402
 from trade_itsuda.models import SearchRequest  # noqa: E402
 from trade_itsuda.retrieval import SearchHit, search  # noqa: E402
 
@@ -36,6 +37,30 @@ CASES: list[tuple[str, str, list[str]]] = [
     ('식당 업소용 냉장고 수리', '', ['수리']),
     ('반도체 웨이퍼 장비', '', []),
 ]
+
+
+USAGE = {'requests': 0, 'input_tokens': 0, 'output_tokens': 0}
+
+
+def counting_client_for(config: Settings):
+    """공급자 응답의 usage(입력·출력 토큰)를 질의별로 더한다. 키·본문은 기록하지 않는다."""
+    client = REAL_CLIENT_FOR(config)
+    create = client.chat.completions.create
+
+    def counted(**kwargs):
+        response = create(**kwargs)
+        USAGE['requests'] += 1
+        if response.usage:
+            USAGE['input_tokens'] += response.usage.prompt_tokens or 0
+            USAGE['output_tokens'] += response.usage.completion_tokens or 0
+        return response
+
+    client.chat.completions.create = counted
+    return client
+
+
+REAL_CLIENT_FOR = agent.client_for
+setattr(agent, 'client_for', counting_client_for)  # 측정할 때만 호출 수를 센다
 
 
 def relevant(hit: SearchHit, words: list[str]) -> bool:
@@ -76,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
                'keyword': score(hits, words), 'keyword_top': [h.company.industry for h in hits]}
         if args.agent:
             started = time.perf_counter()
+            before = dict(USAGE)
             try:
                 result = run_agent(config, records, request)
                 row['agent'] = score(result.hits, words)
@@ -84,12 +110,13 @@ def main(argv: list[str] | None = None) -> int:
             except AgentError as error:
                 row['agent'] = f'실패: {error}'
             row['agent_seconds'] = round(time.perf_counter() - started, 1)
+            row['agent_usage'] = {key: USAGE[key] - before[key] for key in USAGE}
         row['number'] = number
         rows.append(row)
         print(json.dumps(row, ensure_ascii=False))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({'companies': len(records), 'load_seconds': round(load_seconds, 2),
-                                       'model': config.model if args.agent else None, 'rows': rows},
+                                       'model': config.model if args.agent else None, 'usage': USAGE, 'rows': rows},
                                       ensure_ascii=False, indent=2), encoding='utf-8')
     print(f'저장: {args.output}')
     return 0
