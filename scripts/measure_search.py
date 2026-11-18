@@ -80,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = run_agent(config, records, request)
                 row['agent'] = score(result.hits, words)
                 row['agent_tools'] = [step.get('tool') for step in result.trace]
+                row['agent_top'] = [h.company.industry for h in result.hits]
             except AgentError as error:
                 row['agent'] = f'실패: {error}'
             row['agent_seconds'] = round(time.perf_counter() - started, 1)
