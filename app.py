@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import date
 from decimal import Decimal
+import re
 from html import escape
 from urllib.parse import quote
 from uuid import uuid4
@@ -13,7 +14,7 @@ from trade_itsuda import store
 from trade_itsuda.agent import (AgentError, explain_comparison, extract_quote, inquiry_questions, quote_text, run_agent,
                                 trace_lines)
 from trade_itsuda.business import refresh_status
-from trade_itsuda.comparison import compare
+from trade_itsuda.comparison import Comparison, compare
 from trade_itsuda.config import settings
 from trade_itsuda.exporting import csv_report, html_report, inquiry, rows_for_export
 from trade_itsuda.ingest import demo_companies, import_companies, parse_file
@@ -119,10 +120,43 @@ st.html('''<style>
 [data-testid="stExpander"] details { border-radius: 12px !important; border-color: #e6e8ea !important; }
 /* 제주 포인트: AI가 만든 내용에만 제주 주황(#b34f00, 흰 배경 대비 약 7:1) 세로선과 배지를 쓴다.
    KRDS 강조색 규칙대로 화면의 5% 이하. */
-.st-key-ai_summary, .st-key-ai_advice { border-left: 3px solid #b34f00; padding: 2px 0 2px 16px; margin: 4px 0 8px; }
+.st-key-ai_summary, .st-key-ai_advice, .st-key-ai_extract_note { border-left: 3px solid #b34f00; padding: 2px 0 2px 16px; margin: 4px 0 8px; }
 .tis-ai-label { margin: 0; font-weight: 700; color: #1e2124; display: flex; align-items: center; gap: 8px; }
 .tis-ai { display: inline-block; background: #b34f00; color: #fff; font-size: 0.75rem; font-weight: 700;
   line-height: 1; padding: 4px 8px; border-radius: 999px; letter-spacing: 0.02em; }
+/* 하단 바의 '담은 후보 2/5' 같은 상태 알약 */
+.tis-pill { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #ecf2fe; color: #0b50d0;
+  font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+/* Agent가 실제로 한 일: 화살표로 이어진 단계 */
+.tis-trace { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 8px; padding: 0; margin: 8px 0 4px; }
+.tis-trace li { font-size: 0.82rem; color: #1e2124; background: #fff8f2; border: 1px solid #f3d9c4; border-radius: 999px; padding: 4px 10px; }
+.tis-trace li + li::before { content: "→"; color: #b34f00; margin: 0 6px 0 -2px; }
+.tis-source { font-size: 0.8rem; color: #6d7882; margin: 4px 0 0; }
+/* 6단계 결론: 업체별 총액 카드 */
+.tis-verdict { font-size: 1.05rem; margin: 4px 0 12px; }
+.tis-verdict b { color: #228738; }
+.tis-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 4px 0 8px; }
+.tis-card { border: 1px solid #e6e8ea; border-radius: 16px; padding: 16px 18px; background: #fff; }
+.tis-card.base { border-color: #cdd1d5; background: #f8f9fa; }
+.tis-card.best { border-color: #228738; box-shadow: inset 0 0 0 1px #228738; }
+.tis-card .name { font-weight: 700; color: #1e2124; }
+.tis-card .total { font-size: 1.6rem; font-weight: 800; color: #1e2124; margin: 6px 0; letter-spacing: -0.01em; }
+.tis-card .total.unknown { font-size: 1.05rem; color: #6d7882; font-weight: 700; }
+.tis-badge { display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+.tis-badge.base { background: #e6e8ea; color: #464c53; }
+.tis-badge.cheaper { background: #e5f4e4; color: #1a6b2c; }
+.tis-badge.pricier { background: #fbebeb; color: #b42318; }
+.tis-badge.blocked { background: #f9eeda; color: #7a5200; }
+.tis-card ul { margin: 10px 0 0; padding: 0; list-style: none; font-size: 0.8rem; color: #464c53; }
+.tis-card li::before { content: "☐ "; color: #9e6a00; }
+.tis-ai-cols h5 { font-size: 0.9rem; margin: 0 0 4px; }
+.tis-checks { margin: 6px 0 10px; padding-left: 0; list-style: none; }
+.tis-checks li { margin: 2px 0; }
+.tis-checks li::before { content: "☐ "; color: #b34f00; }
+/* 5단계: 업체별 저장 상태 */
+.tis-saved { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
+.tis-saved li { font-size: 0.8rem; padding: 3px 10px; border-radius: 999px; background: #f4f5f6; color: #6d7882; }
+.tis-saved li.ok { background: #e5f4e4; color: #1a6b2c; }
 </style>''')
 # 배경은 화면(뷰포트) 크기를 기준으로 그린다: 그라데이션은 화면 전체, 오름·바다 그림은 화면 너비(최소 1100px)에 맞춰
 # 아래에 붙이고 스크롤해도 고정한다. 해상도와 상관없이 선명하도록 모두 CSS 그라데이션과 SVG(벡터)다.
@@ -195,7 +229,7 @@ def go(step: int) -> None:
 notice: DeltaGenerator  # nav()가 매번 버튼 바 바로 위에 새로 만드는 알림 자리
 
 
-def nav(back: int | None, next_label: str | None, key: str) -> bool:
+def nav(back: int | None, next_label: str | None, key: str, status: str = '') -> bool:
     """화면 아래에 붙는 이전/다음 버튼 바. 이전은 바로 이동하고, 다음은 눌렸는지만 돌려준다(검증은 호출한 단계에서).
 
     버튼을 누른 뒤의 오류·진행 표시는 `notice` 자리(버튼 바 바로 위)에 그린다. 그냥 그리면 화면 아래에 붙은 바 밑으로 숨는다.
@@ -204,9 +238,11 @@ def nav(back: int | None, next_label: str | None, key: str) -> bool:
     notice = st.empty()
     with st.container(key=f'navbar_{key}'):
         left, right = st.columns([1, 1], vertical_alignment='center')
-        with left:
+        with left, st.container(horizontal=True, vertical_alignment='center'):
             if back is not None and st.button('이전', key=f'{key}_back', icon=':material/arrow_back:'):
                 go(back)
+            if status:
+                st.html(f'<span class="tis-pill">{escape(status)}</span>')
         with right:
             return bool(next_label) and st.button(next_label, key=f'{key}_next', type='primary', icon=':material/arrow_forward:')
 
@@ -240,20 +276,56 @@ def ai_label(title: str) -> None:
     st.html(f'<p class="tis-ai-label"><span class="tis-ai">AI</span>{title}</p>')
 
 
-def show_company(c: Company, prefix: str, note: str = '') -> None:
-    """업체 한 곳을 상자 없이 목록의 한 줄로 그린다. 줄과 줄 사이는 얇은 구분선으로 나눈다."""
+def won(value: Decimal | None, currency: str = 'KRW', signed: bool = False) -> str:
+    """화면용 금액: 800000.00 → 800,000원. 소수점이 있으면 둘째 자리까지. 계산·CSV에는 원래 값을 쓴다."""
+    if value is None:
+        return '미확정'
+    sign = '+' if signed and value > 0 else ''
+    number = f'{int(value):,}' if value == value.to_integral_value() else f'{value:,.2f}'
+    return sign + number + ('원' if currency == 'KRW' else f' {currency}')
+
+
+MONEY_DECIMAL = re.compile(r'(?<![\d.-])(-?\d+)\.(\d{2})(?!\d)')
+BIG_NUMBER = re.compile(r'(?<![\d.,-])(-?\d{5,})(?![\d.,-])')
+
+
+def pretty_numbers(text: str) -> str:
+    """AI 문장의 금액만 읽기 쉽게: 765000.00 → 765,000, 35000 → 35,000. 날짜(2026-11-17)는 건드리지 않는다.
+
+    AI에는 비교표 원래 값을 보내야 숫자 검증이 되므로, 형식은 화면에 그릴 때만 바꾼다.
+    """
+    text = MONEY_DECIMAL.sub(lambda m: f'{int(m[1]):,}' + ('' if m[2] == '00' else '.' + m[2]), text)
+    return BIG_NUMBER.sub(lambda m: f'{int(m[1]):,}', text)
+
+
+def source_line(companies: list[Company]) -> str:
+    """후보 목록 위에 한 번만 보여 줄 출처 문장. 출처가 여럿이면 각 업체 줄에 따로 쓴다."""
+    sources = {(c.source_name, str(c.source_date)) for c in companies}
+    if len(sources) != 1:
+        return ''
+    name, day = sources.pop()
+    return f'출처: {name} · 데이터 기준일 {day} · 생산품·주소는 과거 기록이라 현재 공급 여부와 연락처는 업체에 확인하세요.'
+
+
+def show_company(c: Company, prefix: str, note: str = '', show_source: bool = True) -> None:
+    """업체 한 곳을 상자 없이 목록의 한 줄로 그린다. 줄과 줄 사이는 얇은 구분선으로 나눈다.
+
+    show_source=False: 목록 위에 출처를 한 번만 적은 경우(같은 문장을 업체마다 반복하지 않는다).
+    """
     with st.container(key=f'card_{prefix}_{c.id}'):
         st.html(f'<div class="tis-row-head"><strong>{escape(c.name)}</strong>'
                 f'<span>{escape(c.industry)} · {escape(c.region)}</span></div>'
                 + (f'<p class="tis-row-note">{escape(note)}</p>' if note else ''))
         st.text('생산품 기록: ' + c.products)
-        st.caption(f'출처: {c.source_name} · 데이터 기준일 {c.source_date} · 생산품·주소는 과거 기록이라 현재 공급 여부와 연락처는 업체에 확인하세요.')
+        if show_source:
+            st.caption(f'출처: {c.source_name} · 데이터 기준일 {c.source_date} · 생산품·주소는 과거 기록이라 현재 공급 여부와 연락처는 업체에 확인하세요.')
         chosen = c.id in st.session_state.shortlist
         with st.container(horizontal=True):
             if st.button('상세 확인', key=f'{prefix}_view_{c.id}'):
                 record_event(config.database_path, c.id, st.session_state.session_id, 'view')
                 st.session_state['detail'] = c.id
-            if st.button('담기 취소' if chosen else '비교에 담기', key=f'{prefix}_add_{c.id}', type='secondary' if chosen else 'primary'):
+            if st.button('✓ 담음 · 빼기' if chosen else '비교에 담기', key=f'{prefix}_add_{c.id}', type='secondary' if chosen else 'primary',
+                         help='다시 누르면 비교 후보에서 뺍니다.' if chosen else None):
                 if chosen:
                     st.session_state.shortlist.remove(c.id)
                     st.rerun()
@@ -285,7 +357,8 @@ def show_company(c: Company, prefix: str, note: str = '') -> None:
             st.caption('사업자 상태는 품질·신용·납품 능력의 보증이 아닙니다. 성공 결과는 24시간 캐시합니다.')
 
 
-def run_search() -> None:
+def run_search(on_step=None) -> None:
+    """on_step: AI Agent가 도구를 쓸 때마다 단계 문장을 받는다(화면 실시간 표시)."""
     need, scope = st.session_state.need, st.session_state.scope
     region = scope['region'] if scope['region'] != '전체' else ('' if scope['city'] == '전체' else scope['city'])
     request = SearchRequest(query=need['query'], region=region, industry='' if scope['industry'] == '전체' else scope['industry'])
@@ -294,7 +367,7 @@ def run_search() -> None:
     encoder = encoder_at('models/e5') if scope['semantic'] else None
     if scope['use_ai'] and ai_ready:
         try:
-            result = run_agent(config, records, request, encoder)
+            result = run_agent(config, records, request, encoder, on_step=on_step)
             state.hits, state.questions, state.trace, state.summary = result.hits, result.questions, result.trace, result.summary
         except AgentError as error:
             # AI가 실패해도 도민이 멈추지 않도록 키워드 검색 결과로 이어간다.
@@ -350,8 +423,14 @@ def step_scope() -> None:
     if nav(1, '후보 찾기', 'n2'):
         st.session_state.scope = {'city': city, 'region': region, 'industry': industry, 'use_ai': use_ai, 'semantic': semantic}
         try:
-            with notice, st.spinner('근거를 확인하며 찾는 중'):
-                run_search()
+            if use_ai and ai_ready:
+                # Agent가 도구를 쓸 때마다 한 줄씩 보여 준다. 5~15초를 기다리는 동안 무엇을 하는지 보이게 한다.
+                with notice.container(), st.status('AI Agent가 데이터를 확인하며 찾는 중', expanded=True) as progress:
+                    run_search(on_step=lambda line: progress.write('✓ ' + line))
+                    progress.update(label='찾기 완료', state='complete')
+            else:
+                with notice, st.spinner('근거를 확인하며 찾는 중'):
+                    run_search()
             go(3)
         except (ValueError, OSError):
             notice.error('검색 조건 또는 로컬 모델을 확인하세요. 의미 검색을 끄고 다시 시도할 수 있습니다.')
@@ -365,26 +444,29 @@ def step_candidates() -> None:
     st.caption(f"'{state.need['query']}' · 지역 {place} · 최대 5곳까지 담을 수 있습니다.")
     if state.search_note:
         st.warning(state.search_note)
-    if state.summary:
+    if state.summary or state.trace:
         with st.container(key='ai_summary'):
             ai_label('Agent 탐색 요약')
-            st.text(state.summary)
+            if state.summary:
+                st.text(state.summary)
+            # Agent가 실제로 한 일(도구 호출)을 화살표로 이은 단계로 보여 준다. 원본 호출 기록(JSON)은 도민에게 보이지 않는다.
+            steps = ''.join(f'<li>{escape(line)}</li>' for line in trace_lines(state.trace))
+            if steps:
+                st.html(f'<ol class="tis-trace" aria-label="Agent가 수행한 단계">{steps}</ol>')
             st.caption('요약의 숫자는 Agent 도구가 이 PC의 데이터에서 센 값만 허용합니다. 판단은 아래 근거와 함께 확인하세요.')
     for question in state.questions:
         st.text('추가로 확인할 점: ' + question)
-    if state.trace:
-        with st.expander('Agent가 수행한 단계', expanded=True):
-            for number, line in enumerate(trace_lines(state.trace), start=1):
-                st.text(f'{number}. {line}')
-            st.json(state.trace, expanded=False)
     if state.searched and not state.hits:
         st.info('조건에 맞는 근거를 찾지 못했습니다. 이전 단계에서 지역을 넓히거나, 첫 단계에서 품목을 짧게 적어 보세요.')
+    shown = [by_id[hit.company.id] for hit in state.hits if hit.company.id in by_id]
+    common = source_line(shown)
+    if common:
+        st.html(f'<p class="tis-source">{escape(common)}</p>')
     for hit in state.hits:
         if hit.company.id in by_id:
-            show_company(by_id[hit.company.id], 'search', hit.method + ' · ' + ' / '.join(hit.reasons))
-    names = [by_id[cid].name for cid in state.shortlist]
-    st.caption('담은 후보: ' + (', '.join(names) if names else '아직 없음'))
-    if nav(2, '다음: 문의 준비', 'n3'):
+            show_company(by_id[hit.company.id], 'search', '일치 근거: ' + ' · '.join(r.replace('에서 일치: ', ' ') for r in hit.reasons),
+                         show_source=not common)
+    if nav(2, '다음: 문의 준비', 'n3', status=f'담은 후보 {len(state.shortlist)}/5'):
         if not state.shortlist:
             notice.error('비교할 후보를 1곳 이상 담아 주세요.')
         else:
@@ -446,6 +528,11 @@ def step_inquiry() -> None:
             go(5)
 
 
+# 비교에 필요한데 AI 추출에서 비기 쉬운 칸. 비어 있으면 5단계에서 주황으로 표시한다.
+CHECK_FIELDS = [('unit_price', '단가'), ('tax_included', '부가세 포함 여부'), ('shipping', '배송비'), ('extra_cost', '추가 비용'),
+                ('minimum_order', '최소 주문 수량'), ('lead_days', '납기'), ('valid_until', '유효기간')]
+
+
 def quote_form(target: str, name: str, saved_by_id: dict[str, Quote]) -> None:
     state = st.session_state
     existing_id = state.flow_quotes.get(target)
@@ -457,6 +544,18 @@ def quote_form(target: str, name: str, saved_by_id: dict[str, Quote]) -> None:
     else:
         seed = dict(state.conditions)
     prefix = f'q_{target}_{state.extraction_version}_{existing_id or "new"}'
+    if extracted:
+        # AI가 채운 칸 수와, 비교에 중요한데 비어 있는 칸을 알려 주고 그 칸을 주황으로 표시한다.
+        blanks = [(name, label) for name, label in CHECK_FIELDS if extracted.get(name) is None]
+        filled = sum(1 for name in extracted if name != 'company_name')
+        with st.container(key='ai_extract_note'):
+            ai_label(f'견적서에서 {filled}칸을 채웠어요')
+            st.caption('원문과 대조해 고친 뒤 저장하세요.'
+                       + (' 주황색 칸은 견적서에서 찾지 못한 값입니다: ' + ', '.join(label for _, label in blanks) if blanks else ''))
+        css = ''.join(f'.st-key-{prefix}_{"tax" if name == "tax_included" else name} :is(input, [data-baseweb="select"] > div)'
+                      '{background:#fff8f2 !important; box-shadow: inset 0 0 0 1px #b34f00;}' for name, _ in blanks)
+        if css:
+            st.html(f'<style>{css}</style>')
 
     def field(container, label: str, name: str, default: str = '', help: str | None = None):
         value = seed.get(name)
@@ -534,9 +633,15 @@ def step_quotes() -> None:
         labels[label] = key
     chosen = st.radio('견적 업체', list(labels), horizontal=True, key='w_quote_target')
     target = labels.get(chosen or '', next(iter(labels.values())))
+    # 업체마다 저장했는지 한눈에 보이게 한다(선택지 이름은 바꾸지 않는다: 이름이 바뀌면 선택이 풀린다).
+    chips = ''.join(f'<li class="{"ok" if key in state.flow_quotes else ""}">{escape(name)} · '
+                    f'{"저장함" if key in state.flow_quotes else "아직 입력 전"}</li>' for key, name in names.items())
+    st.html(f'<ul class="tis-saved" aria-label="업체별 견적 저장 상태">{chips}</ul>')
     if target == EXISTING:
         st.caption('기존 거래처 견적은 6단계에서 비교 기준이 됩니다.')
-    with st.expander('견적서 텍스트·PDF가 있으면 AI가 칸을 채워 드려요'):
+    # 견적서가 있으면 붙여넣기가 가장 빠르다: 아직 저장·추출하지 않은 업체에서는 펼쳐 둔다.
+    first_time = ai_ready and target not in state.flow_quotes and state.extracted.get('target') != target
+    with st.expander('견적서가 있으면 붙여넣으세요 · AI가 아래 칸을 채워요', expanded=first_time):
         st.caption('연락처·개인정보를 지우고 외부 전송 가능한 자료만 사용하세요. 채운 값은 반드시 원문과 대조하세요.')
         with st.form('extract_form', border=False):
             upload = st.file_uploader('견적 파일 (선택)', type=['txt', 'pdf'], key='quote_file')
@@ -558,13 +663,60 @@ def step_quotes() -> None:
         store.delete_quote(config.database_path, state.flow_quotes.pop(target))
         state.flash = '견적을 삭제했습니다.'
         st.rerun()
-    done = [names[k] for k in state.flow_quotes]
-    st.caption('입력한 견적: ' + (', '.join(done) if done else '아직 없음'))
-    if nav(4, '다음: 비교 결과 보기', 'n5'):
+    if nav(4, '다음: 비교 결과 보기', 'n5', status=f'저장한 견적 {len(state.flow_quotes)}곳'):
         if not state.flow_quotes:
             notice.error('견적을 1개 이상 저장하세요.')
         else:
             go(6)
+
+
+def display_table(rows: list[Comparison]) -> list[dict]:
+    """화면의 자세한 비교표: 금액은 800,000원처럼, 비어 있는 열은 빼고 보여 준다(다운로드 CSV는 원래 값)."""
+    table = [{'업체': r.quote.company_name, '품목': r.quote.item, '규격': r.quote.specification,
+              '수량': f'{r.quote.quantity:,} {r.quote.unit}', '총액': won(r.total, r.quote.currency),
+              '기준 대비 차액': won(r.difference, r.quote.currency, signed=True) if r.difference is not None else '비교 불가',
+              '비교 제한': '; '.join(r.issues), '아직 모르는 것': '; '.join(r.warnings)} for r in rows]
+    empty = [key for key in ('비교 제한', '아직 모르는 것') if not any(row[key] for row in table)]
+    return [{k: v for k, v in row.items() if k not in empty} for row in table]
+
+
+def result_cards(rows: list[Comparison], baseline_id: str) -> None:
+    """6단계 결론: 한 줄 요약 + 업체별 총액 카드(기준·더 싼 곳·비싼 곳·계산 불가 배지, 아직 모르는 것)."""
+    base = next(r for r in rows if r.quote.id == baseline_id)
+    cheaper = [r for r in rows if r.difference is not None and r.difference < 0]
+    if cheaper and base.total:
+        best = min(cheaper, key=lambda r: r.total or 0)
+        assert best.difference is not None
+        verdict = (f'같은 조건에서 가장 싼 곳은 <b>{escape(best.quote.company_name)}</b>입니다. '
+                   f'기준({escape(base.quote.company_name)})보다 <b>{won(-best.difference, best.quote.currency)}</b> 저렴합니다.')
+    elif any(r.difference is not None for r in rows if r is not base):
+        verdict = f'같은 조건으로 비교한 후보 중 기준({escape(base.quote.company_name)})보다 싼 곳은 없습니다.'
+    else:
+        verdict = '아직 같은 조건으로 금액을 비교할 수 있는 후보가 없습니다. 카드의 사유를 확인하세요.'
+    best_id = min(cheaper, key=lambda r: r.total or 0).quote.id if cheaper else None
+    cards = []
+    for r in [base] + [r for r in rows if r is not base]:
+        currency = r.quote.currency
+        if r is base:
+            badge = '<span class="tis-badge base">비교 기준</span>'
+        elif r.difference is not None and base.total:
+            percent = abs(r.difference) / base.total * 100
+            if r.difference < 0:
+                badge = f'<span class="tis-badge cheaper">{won(-r.difference, currency)} ({percent:.1f}%) 저렴</span>'
+            elif r.difference > 0:
+                badge = f'<span class="tis-badge pricier">{won(r.difference, currency)} ({percent:.1f}%) 비쌈</span>'
+            else:
+                badge = '<span class="tis-badge base">기준과 같음</span>'
+        else:
+            badge = '<span class="tis-badge blocked">차액 계산 불가</span>'
+        total = (f'<div class="total">{won(r.total, currency)}</div>' if r.total is not None
+                 else '<div class="total unknown">총액 미확정</div>')
+        notes = [escape(issue) for issue in r.issues] + [escape(w.replace(' 미확인', '')) + ' 확인' for w in r.warnings]
+        listing = f'<ul>{"".join(f"<li>{n}</li>" for n in notes)}</ul>' if notes else ''
+        kind = 'base' if r is base else 'best' if r.quote.id == best_id else ''
+        cards.append(f'<div class="tis-card {kind}"><div class="name">{escape(r.quote.company_name)}</div>'
+                     f'{total}{badge}{listing}</div>')
+    st.html(f'<p class="tis-verdict">{verdict}</p><div class="tis-cards">{"".join(cards)}</div>')
 
 
 def step_result() -> None:
@@ -589,9 +741,11 @@ def step_result() -> None:
         baseline_id = st.selectbox('비교 기준 견적', selected, index=selected.index(default) if default in selected else 0,
                                    format_func=lambda qid: saved_by_id[qid].company_name, key='baseline_id')
         rows = compare([saved_by_id[qid] for qid in selected], baseline_id)
-        table = rows_for_export(rows)
-        st.dataframe(table, hide_index=True, alt='견적 총액과 비교 제한 조건')
-        st.caption('차액 = 후보 총액 − 기준 총액. 조건이 다르거나 비용이 미확인인 견적은 차액 비교에서 제외합니다.')
+        table = rows_for_export(rows)  # AI 해설·CSV에는 계산 원래 값을 쓴다.
+        result_cards(rows, baseline_id)
+        with st.expander('자세한 비교표 보기'):
+            st.dataframe(display_table(rows), hide_index=True, alt='견적 총액과 비교 제한 조건')
+            st.caption('차액 = 후보 총액 − 기준 총액. 조건이 다르거나 비용이 미확인인 견적은 차액 비교에서 제외합니다.')
         with st.container(horizontal=True):
             st.download_button('비교 보고서 (HTML)', html_report(rows, baseline_id, records), '거래잇수다_비교.html', 'text/html', key='download_html')
             st.download_button('비교표 (CSV)', csv_report(rows), '거래잇수다_비교.csv', 'text/csv', key='download_csv')
@@ -608,12 +762,17 @@ def step_result() -> None:
             with st.container(key='ai_advice'):
                 ai_label('비교 해설')
                 st.caption('숫자는 위 비교표 값만 허용합니다. 결정은 업체 확인 후 직접 하세요.')
-                st.text(result.summary)
-                for check in result.checks:
-                    st.text('확인할 점: ' + check)
-                for label, text in [('유지', result.keep), ('병행', result.parallel), ('전환', result.switch)]:
-                    if text:
-                        st.text(f'{label} 검토 조건: {text}')
+                st.text(pretty_numbers(result.summary))
+                if result.checks:
+                    items = ''.join(f'<li>{escape(pretty_numbers(check))}</li>' for check in result.checks)
+                    st.html(f'<p class="tis-ai-label">업체에 확인할 점</p><ul class="tis-checks">{items}</ul>')
+                options = [(label, text) for label, text in [('지금 업체를 유지할 만한 경우', result.keep),
+                                                             ('두 곳과 함께 거래할 만한 경우', result.parallel),
+                                                             ('새 업체로 바꿀 만한 경우', result.switch)] if text]
+                for column, (label, text) in zip(st.columns(len(options)) if options else [], options):
+                    with column:
+                        st.html(f'<div class="tis-ai-cols"><h5>{label}</h5></div>')
+                        st.caption(pretty_numbers(text))
     nav(5, None, 'n6')
     if st.button('처음부터 새로 찾기', key='restart', icon=':material/restart_alt:'):
         for key, value in deepcopy(FLOW_DEFAULTS).items():

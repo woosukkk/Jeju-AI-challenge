@@ -85,8 +85,12 @@ def test_wizard_from_need_to_comparison_without_keys(monkeypatch, tmp_path):
     at.button(key='n5_next').click().run()
     # 6단계: 기존 거래처가 기준 견적이 되고 차액을 계산한다.
     assert at.session_state['step'] == 6 and not at.exception
-    table = at.dataframe[0].value
-    assert table.loc[table['업체'] == '가상 한라라벨', '기준 대비 차액'].iloc[0] == '-10000.00'
+    table = at.dataframe[0].value  # 접힌 '자세한 비교표': 금액은 화면용 형식
+    assert table.loc[table['업체'] == '가상 한라라벨', '기준 대비 차액'].iloc[0] == '-10,000원'
+    assert table.loc[table['업체'] == '가상 한라라벨', '총액'].iloc[0] == '90,000원'
+    # 결론 한 줄과 카드: 가장 싼 곳과 차액(10%)을 보여 준다.
+    verdict = next(str(h.proto) for h in at.get('html') if 'tis-verdict' in str(h.proto))
+    assert '가상 한라라벨' in verdict and '10,000원' in verdict and '(10.0%) 저렴' in verdict
     assert len(at.get('download_button')) == 2
     at.button(key='n6_back').click().run()
     assert at.session_state['step'] == 5
