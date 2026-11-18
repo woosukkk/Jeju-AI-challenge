@@ -44,3 +44,24 @@ def test_demo_and_external_disabled_never_call(tmp_path):
     def fail(*args, **kwargs):
         raise AssertionError('network must not run')
     assert refresh_status(path, demo_companies()[0], config, post=fail)['payload'] is None
+
+
+
+def test_lookup_status_without_saving():
+    import pytest
+    from trade_itsuda.business import lookup_status
+    config = Settings(Path('unused'), 'openai', 'x', '', 'private-nts-key', True)
+    def post(url, **kwargs):
+        assert kwargs['json'] == {'b_no': ['1248100998']}
+        return httpx.Response(200, request=httpx.Request('POST', url),
+                              json={'status_code': 'OK', 'data': [{'b_no': '1248100998', 'b_stt_cd': '03', 'end_dt': '20200101'}]})
+    result = lookup_status('124-81-00998', config, post=post)
+    assert (result['label'], result['end_dt']) == ('폐업자', '20200101')
+    with pytest.raises(ValueError, match='10자리'):
+        lookup_status('12-34', config, post=post)
+    with pytest.raises(ValueError, match='키'):
+        lookup_status('1248100998', Settings(Path('unused'), 'openai', 'x', '', '', True), post=post)
+    def broken(url, **kwargs):
+        raise httpx.ConnectError('down')
+    with pytest.raises(ValueError, match='실패'):
+        lookup_status('1248100998', config, post=broken)

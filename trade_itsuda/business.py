@@ -10,6 +10,39 @@ from .store import connect, read_status
 ENDPOINT = 'https://api.odcloud.kr/api/nts-businessman/v1/status'
 
 
+LABELS = {'01': '계속사업자', '02': '휴업자', '03': '폐업자'}
+
+
+def business_number(value: str) -> str:
+    """사업자번호를 숫자 10자리로 정리한다. 형식이 틀리면 ValueError."""
+    number = value.replace('-', '').replace(' ', '').strip()
+    if not (number.isascii() and number.isdigit() and len(number) == 10):
+        raise ValueError('사업자번호는 숫자 10자리입니다(예: 123-45-67890).')
+    return number
+
+
+def lookup_status(number: str, config: Settings, *, post=None, now: datetime | None = None) -> dict:
+    """국세청 상태조회를 한 번 부른다. 저장·캐시 없이 결과만 돌려준다(5단계 '사업자 상태 확인'용).
+
+    돌려주는 값: b_no, code, label(계속사업자·휴업자·폐업자·확인 불가), end_dt, checked_at. 실패하면 ValueError.
+    """
+    number = business_number(number)
+    if not config.allow_external_data or not config.nts_key:
+        raise ValueError('국세청 API 키와 외부 전송 허용 설정이 필요합니다.')
+    try:
+        response = (post or httpx.post)(ENDPOINT, params={'serviceKey': config.nts_key}, json={'b_no': [number]}, timeout=10)
+        response.raise_for_status()
+        body = response.json()
+    except (httpx.HTTPError, ValueError):
+        raise ValueError('국세청 조회에 실패했습니다. 잠시 뒤 다시 시도하세요.') from None
+    data = body.get('data') or []
+    if body.get('status_code') != 'OK' or len(data) != 1 or data[0].get('b_no') != number:
+        raise ValueError('국세청 응답을 확인하지 못했습니다.')
+    code = data[0].get('b_stt_cd')
+    return {'b_no': number, 'code': code, 'label': LABELS.get(code, '확인 불가'), 'end_dt': data[0].get('end_dt') or None,
+            'checked_at': (now or datetime.now(timezone.utc)).isoformat()}
+
+
 def refresh_status(path, company: Company, config: Settings, *, now=None, post=None):
     now = now or datetime.now(timezone.utc)
     cached = read_status(path, company.id)
@@ -37,7 +70,7 @@ def refresh_status(path, company: Company, config: Settings, *, now=None, post=N
             raise ValueError()
         code = data.get('b_stt_cd')
         payload = {'b_no': company.business_number, 'code': code,
-                   'label': {'01': '계속사업자', '02': '휴업자', '03': '폐업자'}.get(code, '확인 불가'),
+                   'label': LABELS.get(code, '확인 불가'),
                    'end_dt': data.get('end_dt') or None}
         checked_at = now.isoformat()
     except Exception:
