@@ -5,6 +5,7 @@ from typing import Callable
 
 from .comparison import Comparison, today
 from .models import Company
+from .reply import reply_form
 
 
 def inquiry(company_name: str, item: str, specification: str, quantity: str, unit: str, notes: str = '',
@@ -20,9 +21,8 @@ def inquiry(company_name: str, item: str, specification: str, quantity: str, uni
             f'- 품목: {item}\n- 규격: {specification}\n- 요청 수량: {quantity} {unit}\n'
             f'- 추가 요청: {notes or "없음"}\n\n'
             + extra +
-            '단가와 통화, 부가세 포함 여부·세율, 세금 포함 배송비·추가 비용, 최소 주문 수량, '
-            '납기, 견적 유효기간을 알려주시면 감사하겠습니다.\n'
-            '거래 조건과 업체 담당자 연락처도 함께 확인 부탁드립니다.\n\n'
+            '견적은 아래 회신 양식을 채워 보내 주시면 감사하겠습니다. 거래 조건과 담당자 연락처도 함께 알려 주세요.\n\n'
+            + reply_form(company_name, item, specification, quantity, unit) + '\n'
             '이 문서는 거래잇수다에서 만든 문의 초안이며 아직 발송되지 않았습니다.\n')
 
 

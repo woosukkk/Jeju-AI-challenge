@@ -21,6 +21,7 @@ from trade_itsuda.exporting import csv_report, html_report, inquiry, rows_for_ex
 from trade_itsuda.ingest import demo_companies, import_companies, parse_file
 from trade_itsuda.models import Company, Quote, SearchRequest
 from trade_itsuda.popularity import popular, prune_events, record_event
+from trade_itsuda.reply import parse_reply
 from trade_itsuda.retrieval import load_encoder, search
 
 STEPS = ['필요 품목', '지역', '후보 고르기', '문의 준비', '견적 입력', '비교 결과']
@@ -573,7 +574,8 @@ def step_inquiry() -> None:
     cond = state.conditions
     targets = flow_targets()
     st.subheader('견적 요청 조건을 한 번만 적으세요')
-    st.caption('초안은 자동으로 보내지 않습니다. 내려받거나 복사해 직접 보내세요.')
+    st.caption('초안은 자동으로 보내지 않습니다. 내려받거나 복사해 직접 보내세요. '
+               '초안 끝의 회신 양식을 업체가 채워 보내면, 5단계에 붙여 넣기만 해도 견적 칸이 채워져요.')
     st.caption('문의 대상: ' + ', '.join(name for _, name, _ in targets))
     with st.form('conditions_form', border=False):
         body = form_section('sec_c1', '보낼 조건', '업체마다 같은 조건으로 묻고, 5단계 견적 칸에도 그대로 채웁니다.')
@@ -650,9 +652,13 @@ def quote_form(target: str, name: str, saved_by_id: dict[str, Quote]) -> None:
         blanks = [(name, label) for name, label in CHECK_FIELDS if extracted.get(name) is None]
         filled = sum(1 for name in extracted if name != 'company_name')
         with st.container(key='ai_extract_note'):
-            ai_label(f'견적서에서 {filled}칸을 채웠어요')
+            if state.extracted.get('source') == 'form':
+                st.html(f'<p class="tis-ai-label">업체 회신 양식에서 {filled}칸을 채웠어요</p>')
+            else:
+                ai_label(f'견적서에서 {filled}칸을 채웠어요')
+            where = '회신' if state.extracted.get('source') == 'form' else '견적서'
             st.caption('원문과 대조해 고친 뒤 저장하세요.'
-                       + (' 주황색 칸은 견적서에서 찾지 못한 값입니다: ' + ', '.join(label for _, label in blanks) if blanks else ''))
+                       + (f' 주황색 칸은 {where}에서 찾지 못한 값입니다: ' + ', '.join(label for _, label in blanks) if blanks else ''))
         css = ''.join(f'.st-key-{prefix}_{"tax" if name == "tax_included" else name} :is(input, [data-baseweb="select"] > div)'
                       '{background:#fff8f2 !important; box-shadow: inset 0 0 0 1px #b34f00;}' for name, _ in blanks)
         if css:
@@ -732,6 +738,10 @@ def step_quotes() -> None:
         while label in labels:
             label += ' (2)'
         labels[label] = key
+    # 회신 양식의 '문의 업체'로 업체를 찾았으면 그 업체를 골라 둔다(라디오를 그리기 전에만 바꿀 수 있다).
+    pending = state.pop('pending_target', None)
+    if pending in labels.values():
+        st.session_state.w_quote_target = next(label for label, key in labels.items() if key == pending)
     chosen = st.radio('견적 업체', list(labels), horizontal=True, key='w_quote_target')
     target = labels.get(chosen or '', next(iter(labels.values())))
     # 업체마다 저장했는지 한눈에 보이게 한다(선택지 이름은 바꾸지 않는다: 이름이 바뀌면 선택이 풀린다).
@@ -759,21 +769,33 @@ def step_quotes() -> None:
             st.text(f"{found['b_no'][:3]}-{found['b_no'][3:5]}-{found['b_no'][5:]} → {found['label']}{closed}")
     # 견적서가 있으면 붙여넣기가 가장 빠르다: 아직 저장·추출하지 않은 업체에서는 펼쳐 둔다.
     first_time = ai_ready and target not in state.flow_quotes and state.extracted.get('target') != target
-    with st.expander('견적서가 있으면 붙여넣으세요 · AI가 아래 칸을 채워요', expanded=first_time):
-        st.caption('붙여 넣은 내용은 AI 서비스(OpenAI)로 보내져요. 연락처·개인정보는 지우고, 채운 값은 원문과 대조하세요.')
+    with st.expander('받은 회신·견적서를 붙여 넣으면 칸을 채워요', expanded=first_time):
+        st.caption('업체가 4단계 초안의 회신 양식을 채워 보냈다면 AI 없이 바로 채우고 업체도 골라 줘요. '
+                   '양식이 아닌 견적서는 AI가 읽어요(내용이 OpenAI로 보내지니 연락처·개인정보는 지우세요). 채운 값은 원문과 대조하세요.')
         with st.form('extract_form', border=False):
-            upload = st.file_uploader('견적 파일 (선택)', type=['txt', 'pdf'], key='quote_file')
-            text = st.text_area('또는 견적 원문 붙여넣기', key='quote_text', max_chars=20000)
-            extract = st.form_submit_button('AI로 칸 채우기', key='extract_submit', disabled=not ai_ready)
+            upload = st.file_uploader('회신·견적 파일 (선택)', type=['txt', 'pdf'], key='quote_file')
+            text = st.text_area('또는 회신·견적 내용 붙여넣기', key='quote_text', max_chars=20000)
+            extract = st.form_submit_button('칸 채우기', key='extract_submit')
         if extract:
             try:
                 raw = quote_text(upload.getvalue(), upload.name) if upload else text
-                count_ai()
-                with st.spinner('견적 추출 중'):
-                    draft = extract_quote(config, raw)
-                state.extracted = {'target': target, 'values': draft.model_dump(mode='json', exclude_none=True)}
+                reply = parse_reply(raw)
+                if reply is not None:
+                    # 회신 양식: 코드가 읽는다(AI·비용 없음). '문의 업체' 이름으로 견적 업체를 고른다.
+                    found = next((key for key, name in names.items() if reply.company_name and name == reply.company_name), target)
+                    values = reply.model_dump(mode='json', exclude_none=True)
+                    state.extracted = {'target': found, 'values': values, 'source': 'form'}
+                    state.pending_target = found
+                    state.flash = f"{names.get(found, '이 업체')} 회신 양식에서 {sum(1 for k in values if k != 'company_name')}칸을 채웠습니다. 원문과 대조하세요."
+                elif not ai_ready:
+                    raise AgentError('회신 양식이 아닌 견적서는 AI가 읽어야 하는데, 지금은 AI를 쓸 수 없어요. 칸에 직접 입력하세요.')
+                else:
+                    count_ai()
+                    with st.spinner('견적 추출 중'):
+                        draft = extract_quote(config, raw)
+                    state.extracted = {'target': target, 'values': draft.model_dump(mode='json', exclude_none=True), 'source': 'ai'}
+                    state.flash = '추출값을 채웠습니다. 원문과 대조하고 빠진 조건을 입력하세요.'
                 state.extraction_version += 1
-                state.flash = '추출값을 채웠습니다. 원문과 대조하고 빠진 조건을 입력하세요.'
                 st.rerun()
             except AgentError as error:
                 st.error(str(error))

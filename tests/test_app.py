@@ -206,3 +206,32 @@ def test_data_menu_is_for_operators_only(monkeypatch, tmp_path):
     fresh.query_params['admin'] = '1'
     fresh.run()
     assert '데이터 관리' in fresh.radio(key='page').options
+
+
+def test_filled_reply_form_fills_the_right_quote_without_ai(monkeypatch, tmp_path):
+    at = with_demo(monkeypatch, tmp_path)
+    at.radio(key='w_journey').set_value('기존 거래처와 비교').run()
+    at.text_input(key='w_query').set_value('라벨')
+    at.text_input(key='w_existing').set_value('기존 거래업체')
+    at.button(key='n1_next').click().run()
+    at.button(key='n2_next').click().run()
+    at.button(key='search_add_demo-print').click().run()
+    at.button(key='n3_next').click().run()
+    at.text_input(key='w_item').set_value('라벨')
+    at.text_input(key='w_spec').set_value('50mm')
+    at.text_input(key='w_quantity').set_value('1000')
+    at.button(key='create_inquiry').click().run()
+    draft = at.session_state['drafts']['demo-print']
+    assert '[회신 양식]' in draft
+    reply = (draft.replace('단가(원): ', '단가(원): 90', 1).replace('포함 / 별도 (하나만 남겨 주세요)', '포함')
+             .replace('배송비(원, 세금 포함): ', '배송비(원, 세금 포함): 0', 1)
+             .replace('추가 비용(원, 설치·디자인 등, 세금 포함): ', '추가 비용(원, 설치·디자인 등, 세금 포함): 0', 1))
+    at.button(key='n4_next').click().run()
+    assert at.radio(key='w_quote_target').value == '기존 거래업체'  # 첫 업체가 골라져 있어도
+    at.text_area(key='quote_text').set_value(reply)
+    at.button(key='extract_submit').click().run()  # AI 없이(키 없음) 양식을 읽는다
+    assert not at.exception and not at.error
+    assert at.radio(key='w_quote_target').value == '가상 한라라벨'  # 회신의 '문의 업체'로 업체를 바꿔 고른다
+    assert next(w for w in at.text_input if w.label == '단가').value == '90'
+    assert next(w for w in at.selectbox if w.label == '단가에 부가세 포함?').value == '포함'
+    assert any('회신 양식에서' in str(h.proto) for h in at.get('html'))
