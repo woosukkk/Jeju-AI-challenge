@@ -239,8 +239,12 @@ with st.container(key='appbar'):
         st.html('<div class="tis-brand"><span class="tis-logo" aria-hidden="true">거</span>'
                 '<div><strong>거래잇수다</strong><small>제주 거래처 찾기 · 견적 비교</small></div></div>')
     with menu:
-        page = st.radio('메뉴', ['거래처 찾기', '최근 관심 업체', '데이터 관리'], key='page', horizontal=True,
-                        label_visibility='collapsed')
+        # '데이터 관리'는 설치·운영 담당자용이다. 도민 메뉴에는 두지 않고, 데이터가 아직 없을 때나
+        # 주소 뒤에 ?admin=1을 붙였을 때만 보인다(한 번 보이면 이 세션 동안 유지).
+        if not records or st.query_params.get('admin') in ('1', 'true'):
+            st.session_state.admin = True
+        pages = ['거래처 찾기', '최근 관심 업체'] + (['데이터 관리'] if st.session_state.get('admin') else [])
+        page = st.radio('메뉴', pages, key='page', horizontal=True, label_visibility='collapsed')
     with status:
         dot = '#228738' if ai_ready else '#9e6a00'
         st.html(f'<div class="tis-status"><span class="count">업체 <b>{len(records):,}</b>곳</span>'
@@ -249,7 +253,7 @@ if st.session_state.flash:
     st.toast(st.session_state.flash, icon=':material/check_circle:')
     st.session_state.flash = ''
 if any(c.is_demo for c in records):
-    st.warning('가상 데이터로 기능을 체험 중입니다. 실제 기업 정보·대회 필수 데이터 활용 실적이 아닙니다.')
+    st.warning('가상 업체로 기능을 체험하는 중이에요. 실제 업체가 아닙니다.')
 
 
 def go(step: int) -> None:
@@ -363,7 +367,8 @@ def show_company(c: Company, prefix: str, note: str = '', show_source: bool = Tr
             st.caption(f'출처: {c.source_name} · 데이터 기준일 {c.source_date} · 생산품·주소는 과거 기록이라 현재 공급 여부와 연락처는 업체에 확인하세요.')
         chosen = c.id in st.session_state.shortlist
         with st.container(horizontal=True):
-            if st.button('상세 확인', key=f'{prefix}_view_{c.id}'):
+            # 상세에 보여 줄 것(웹사이트·사업자번호)이 있을 때만 버튼을 둔다. 상가 데이터에는 둘 다 없다.
+            if (c.website or c.business_number) and st.button('상세 확인', key=f'{prefix}_view_{c.id}'):
                 record_event(config.database_path, c.id, st.session_state.session_id, 'view')
                 st.session_state['detail'] = c.id
             # 담기·빼기는 서로 다른 버튼(키)이다. 같은 키로 번갈아 쓰면 빠른 두 번 클릭이 '담고 바로 빼기'가 된다.
@@ -392,12 +397,12 @@ def show_company(c: Company, prefix: str, note: str = '', show_source: bool = Tr
                 payload = status.get('payload')
                 if payload and payload.get('b_no') == c.business_number:
                     st.text('사업자 상태: ' + payload['label'])
-                    st.caption('국세청 조회 성공 시각: ' + str(status['checked_at']))
+                    st.caption('국세청 확인 시각: ' + str(status['checked_at'])[:16].replace('T', ' '))
                 if status.get('error'):
                     st.warning(status['error'])
             else:
                 st.caption('국세청 상태: 아직 조회하지 않음')
-            st.caption('사업자 상태는 품질·신용·납품 능력의 보증이 아닙니다. 성공 결과는 24시간 캐시합니다.')
+            st.caption('사업자 상태는 품질·신용·납품 능력의 보증이 아닙니다.')
 
 
 def run_search(on_step=None) -> None:
@@ -467,7 +472,7 @@ def step_need() -> None:
         existing = st.text_input('지금 거래하는 업체 이름', value=need['existing'], max_chars=200, key='w_existing',
                                  help='검색 데이터에 없어도 됩니다. 5단계에서 이 업체의 견적을 비교 기준으로 씁니다.')
     if not records:
-        st.info('검색할 기업 데이터가 아직 없습니다. 위쪽 메뉴의 "데이터 관리"에서 CSV를 가져오거나, '
+        st.info('검색할 업체 데이터가 아직 없습니다. 위쪽 메뉴의 "데이터 관리"에서 CSV를 가져오거나, '
                 '설치 폴더의 import_data.bat을 실행한 뒤 앱을 새로 고치세요.')
     if nav(None, '다음: 지역 고르기', 'n1'):
         if not query.strip():
@@ -491,15 +496,15 @@ def step_scope() -> None:
     use_ai = st.toggle('AI Agent가 업종 분류와 지역 분포를 확인하며 찾기', value=scope['use_ai'] and ai_ready,
                        disabled=not ai_ready, key='w_ai')
     if ai_limit_reached:
-        st.caption(f'이 화면에서 AI를 {config.ai_session_limit}번 써서 한도에 닿았습니다(비용 관리). 지금은 키워드 검색으로 찾습니다.')
+        st.caption(f'AI를 {config.ai_session_limit}번 써서 더는 쓸 수 없어요. 지금은 키워드로 찾습니다.')
     elif not ai_ready:
-        st.caption('AI Agent를 쓰려면 API 키와 외부 전송 허용 설정이 필요합니다. 지금은 키워드 검색으로 찾습니다.')
+        st.caption('지금은 AI 없이 키워드로 찾습니다.')
     with st.expander('업종을 알고 있다면 (선택)'):
         industries = ['전체'] + sorted({c.industry for c in records})
         industry = st.selectbox('업종', industries, key='w_industry',
                                 index=industries.index(scope['industry']) if scope['industry'] in industries else 0)
-        semantic = st.checkbox('로컬 의미 검색 함께 사용', value=scope['semantic'], key='w_semantic',
-                               help='선택 설치 및 models/e5 모델 준비가 필요합니다. 자동 다운로드하지 않습니다.')
+        # 로컬 의미 검색(선택 설치 모델)은 화면에서 고르지 않는다. 모델을 설치한 운영자만 코드에서 켤 수 있다.
+        semantic = scope['semantic']
     if nav(1, '후보 찾기', 'n2'):
         st.session_state.scope = {'city': city, 'region': region, 'industry': industry, 'use_ai': use_ai, 'semantic': semantic}
         try:
@@ -527,7 +532,7 @@ def step_candidates() -> None:
             steps = ''.join(f'<li>{escape(line)}</li>' for line in trace_lines(state.trace))
             if steps:
                 st.html(f'<ol class="tis-trace" aria-label="Agent가 수행한 단계">{steps}</ol>')
-            st.caption('요약의 숫자는 Agent 도구가 이 PC의 데이터에서 센 값만 허용합니다. 판단은 아래 근거와 함께 확인하세요.')
+            st.caption('요약 속 숫자는 데이터에서 직접 센 값만 씁니다. 실제 공급 여부는 업체에 확인하세요.')
     if state.questions:
         # AI가 요청이 모호하다고 본 점. 답하면 답을 붙여 다시 찾는다(한 번 묻고 끝나는 게 아니라 대화로 이어진다).
         with st.form('answers_form', border=False):
@@ -755,7 +760,7 @@ def step_quotes() -> None:
     # 견적서가 있으면 붙여넣기가 가장 빠르다: 아직 저장·추출하지 않은 업체에서는 펼쳐 둔다.
     first_time = ai_ready and target not in state.flow_quotes and state.extracted.get('target') != target
     with st.expander('견적서가 있으면 붙여넣으세요 · AI가 아래 칸을 채워요', expanded=first_time):
-        st.caption('연락처·개인정보를 지우고 외부 전송 가능한 자료만 사용하세요. 채운 값은 반드시 원문과 대조하세요.')
+        st.caption('붙여 넣은 내용은 AI 서비스(OpenAI)로 보내져요. 연락처·개인정보는 지우고, 채운 값은 원문과 대조하세요.')
         with st.form('extract_form', border=False):
             upload = st.file_uploader('견적 파일 (선택)', type=['txt', 'pdf'], key='quote_file')
             text = st.text_area('또는 견적 원문 붙여넣기', key='quote_text', max_chars=20000)
@@ -884,7 +889,7 @@ def step_result() -> None:
             result = state.advice[1]
             with st.container(key='ai_advice'):
                 ai_label('비교 해설')
-                st.caption('숫자는 위 비교표 값만 허용합니다. 결정은 업체 확인 후 직접 하세요.')
+                st.caption('해설 속 숫자는 위 비교표에 있는 값만 씁니다. 결정은 업체에 확인한 뒤 직접 하세요.')
                 st.text(pretty_numbers(result.summary))
                 if result.checks:
                     items = ''.join(f'<li>{escape(pretty_numbers(check))}</li>' for check in result.checks)
@@ -904,20 +909,22 @@ def step_result() -> None:
 
 
 def page_popular() -> None:
-    st.subheader('최근 30일, 이용자가 관심을 보인 업체')
-    st.caption('상세 보기·비교 선택에서 수집한 세션별·일별 관심 수입니다. 같은 세션의 같은 날 반복 클릭은 중복 처리합니다. 품질·신용 순위가 아닙니다.')
+    st.subheader('최근 30일, 많이 비교한 업체')
+    st.caption('이 PC에서 비교 후보로 많이 담은 업체예요. 품질이나 신용 순위는 아닙니다.')
     prune_events(config.database_path)
     region = st.selectbox('관심 업체 지역', ['전체'] + sorted({c.region for c in records}), key='popular_region')
     allowed = {c.id for c in records if region == '전체' or c.region == region}
     rankings = popular(config.database_path, allowed_ids=allowed)
     if not rankings:
-        st.info('아직 집계된 관심 기록이 없습니다. 가상 수치를 채우지 않습니다.')
+        st.info('아직 집계된 관심 기록이 없어요. 거래처 찾기에서 업체를 비교 후보로 담으면 여기에 모여요.')
+    common = source_line([by_id[rank['company_id']] for rank in rankings])
+    if common:
+        st.html(f'<p class="tis-source">{escape(common)}</p>')
     for rank in rankings:
         c = by_id[rank['company_id']]
         if config.nts_key and config.allow_external_data and c.business_number:
             refresh_status(config.database_path, c, config)
-        show_company(c, 'popular', f'관심 {rank["interest_count"]}회 · 상세 보기 {rank["views"]}회 · 비교 선택 {rank["comparisons"]}회')
-    st.caption('사업자번호가 있는 업체만 이 화면을 여는 동안 캐시 주기에 따라 국세청 상태를 갱신합니다. 앱이 꺼져 있을 때나 생산품 정보는 자동 갱신하지 않습니다.')
+        show_company(c, 'popular', f'관심 {rank["interest_count"]}회', show_source=not common)
 
 def page_data() -> None:
     st.subheader('기업 데이터 가져오기')

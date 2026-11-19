@@ -155,7 +155,7 @@ def test_ai_limit_falls_back_to_keyword_search(monkeypatch, tmp_path):
     assert any('한도 도달' in str(h.proto) for h in at.get('html'))
     at.text_input(key='w_query').set_value('라벨')
     at.button(key='n1_next').click().run()
-    assert at.toggle(key='w_ai').disabled and any('한도' in c.value for c in at.caption)
+    assert at.toggle(key='w_ai').disabled and any('더는 쓸 수 없어요' in c.value for c in at.caption)
     at.button(key='n2_next').click().run()
     assert at.session_state['step'] == 3 and at.session_state['search_log']['method'] == '키워드 검색'
     assert at.session_state['ai_used'] == 0
@@ -195,3 +195,14 @@ def test_quote_for_a_company_outside_the_candidates(monkeypatch, tmp_path):
     at.button(key='n5_next').click().run()
     table = at.dataframe[0].value
     assert table.loc[table['업체'] == '가상 동문상회', '기준 대비 차액'].iloc[0] == '-100원'
+
+
+def test_data_menu_is_for_operators_only(monkeypatch, tmp_path):
+    # 데이터가 없으면 '데이터 관리'가 보이고(처음 설치), 새 세션에서는 데이터가 있으면 도민 메뉴에 없다.
+    at = with_demo(monkeypatch, tmp_path)
+    assert '데이터 관리' in at.radio(key='page').options  # 이 세션은 처음에 데이터가 없어 열렸으므로 유지
+    fresh = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py'), default_timeout=15).run()
+    assert fresh.radio(key='page').options == ['거래처 찾기', '최근 관심 업체']
+    fresh.query_params['admin'] = '1'
+    fresh.run()
+    assert '데이터 관리' in fresh.radio(key='page').options
