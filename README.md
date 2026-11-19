@@ -34,7 +34,7 @@ AI 설정은 `.env`에 있습니다. 제출 ZIP에는 사용 한도를 건 **평
 | 모델·API·오픈소스·AI 도구 | [모델·API·오픈소스 명세](docs/THIRD_PARTY.md): 사용 모델, 외부 API, 라이브러리, 개발에 쓴 AI 도구 |
 | 결과 설명자료 | [결과 설명과 검증](docs/RESULTS.md): Agent 구조, 실제 데이터 검색 측정, 비용, 검증 방법·한계 / [제품 기획](docs/PRODUCT.md): 문제 정의 / 기획서 8장: 센터 활용 방안 |
 
-개발 과정 기록(`docs/PROGRESS.md`, `docs/TODO.md`, `docs/HANDOFF.md`, `docs/IMPLEMENTATION.md`)은 참고용입니다.
+실제 데이터·AI 실호출·설치 검증의 날짜별 기록은 [결과 설명과 검증](docs/RESULTS.md)에 있습니다.
 
 ## 검증
 

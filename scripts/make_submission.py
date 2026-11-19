@@ -18,6 +18,9 @@ DATA_NAME = 'data_source/jeju_store.csv'
 # 담기면 안 되는 경로: 실제 키 설정, 로컬 DB·사용자 견적, 가상환경, 모델, 내려받은 원본 표.
 FORBIDDEN = re.compile(r'(^|/)(\.env(\..*)?|\.venv/.*|\.git/.*|models/.*|data/.*|outputs/.*)$|\.(sqlite3?|db|xlsx|xls)$')
 ALLOWED_ENV = {'.env.example'}
+# 개발 과정 메모(다음 개발자·AI용 인수인계, 할 일 목록, 날짜별 작업 기록)는 저장소에만 두고 제출 ZIP에는 넣지 않는다.
+# 제출물에 필요한 검증 기록은 docs/RESULTS.md에 있다.
+DEV_NOTES = {'docs/TODO.md', 'docs/HANDOFF.md', 'docs/IMPLEMENTATION.md', 'docs/PROPOSAL_OUTLINE.md', 'docs/PROGRESS.md'}
 # 공급자 키 형태(Google AIza…, OpenAI sk-…)가 본문에 들어갔는지 검사한다.
 SECRET = re.compile(rb'AIza[0-9A-Za-z_\-]{30,}|sk-[A-Za-z0-9_\-]{20,}')
 
@@ -72,7 +75,8 @@ def build(output: Path, data: Path | None, env: Path | None = None) -> list[str]
     if git('status', '--porcelain', '--untracked-files=no').strip():
         raise ValueError('커밋하지 않은 변경이 있습니다. 커밋한 상태에서 다시 실행하세요.')
     archive = ZipFile(io.BytesIO(git('archive', '--format=zip', 'HEAD')))
-    entries = [(info.filename, archive.read(info)) for info in archive.infolist() if not info.is_dir()]
+    entries = [(info.filename, archive.read(info)) for info in archive.infolist()
+               if not info.is_dir() and info.filename not in DEV_NOTES]
     if data:
         entries.append((DATA_NAME, data.read_bytes()))
     errors = [issue for name, content in entries if name != DATA_NAME for issue in problems(name, content)]
