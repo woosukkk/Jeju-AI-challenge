@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from decimal import Decimal
 from urllib.parse import urlsplit
@@ -110,6 +111,16 @@ class QuoteExtraction(Record):
     lead_days: int | None = Field(default=None, ge=0)
     issued_at: date | None = None
     valid_until: date | None = None
+    # 견적서에 적힌 사업자등록번호(숫자 10자리). 국세청 상태조회에 쓴다. 형식이 틀리면 비운다.
+    business_number: str | None = None
+
+    @field_validator('business_number', mode='before')
+    @classmethod
+    def business_number_digits(cls, value):
+        if value is None:
+            return None
+        digits = re.sub(r'[\s-]', '', str(value))
+        return digits if digits.isascii() and digits.isdigit() and len(digits) == 10 else None
 
     @field_validator('currency', mode='before')
     @classmethod

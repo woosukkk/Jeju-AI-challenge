@@ -215,3 +215,10 @@ def test_extraction_accepts_korean_currency_words():
     raw = '{"item":"LED 간판","currency":"금화"}'
     result = extract_quote(config(), '견적', client=FakeClient([final(raw)]))
     assert result.currency is None and result.item == 'LED 간판'  # 모르는 표기는 비우고 나머지는 살린다.
+
+
+def test_extraction_keeps_a_business_number_for_the_tax_office_check():
+    raw = '{"item":"LED 간판","unit_price":650000,"business_number":"124-81-00998"}'
+    assert extract_quote(config(), '견적', client=FakeClient([final(raw)])).business_number == '1248100998'
+    raw = '{"item":"LED 간판","business_number":"번호 없음"}'
+    assert extract_quote(config(), '견적', client=FakeClient([final(raw)])).business_number is None

@@ -235,3 +235,39 @@ def test_filled_reply_form_fills_the_right_quote_without_ai(monkeypatch, tmp_pat
     assert next(w for w in at.text_input if w.label == '단가').value == '90'
     assert next(w for w in at.selectbox if w.label == '단가에 부가세 포함?').value == '포함'
     assert any('회신 양식에서' in str(h.proto) for h in at.get('html'))
+
+
+def test_business_number_in_reply_checks_status_and_warns(monkeypatch, tmp_path):
+    import httpx
+    calls = []
+    def fake_post(url, **kwargs):
+        calls.append(kwargs['json'])
+        return httpx.Response(200, request=httpx.Request('POST', url),
+                              json={'status_code': 'OK', 'data': [{'b_no': kwargs['json']['b_no'][0], 'b_stt_cd': '03', 'end_dt': '20250101'}]})
+    monkeypatch.setattr(httpx, 'post', fake_post)
+    at = with_demo(monkeypatch, tmp_path)
+    monkeypatch.setenv('NTS_API_KEY', 'test-key')
+    monkeypatch.setenv('ALLOW_EXTERNAL_DATA', 'true')
+    at.text_input(key='w_query').set_value('라벨')
+    at.button(key='n1_next').click().run()
+    at.button(key='n2_next').click().run()
+    at.button(key='search_add_demo-print').click().run()
+    at.button(key='n3_next').click().run()
+    at.text_input(key='w_item').set_value('라벨')
+    at.text_input(key='w_spec').set_value('50mm')
+    at.text_input(key='w_quantity').set_value('1000')
+    at.button(key='create_inquiry').click().run()
+    reply = (at.session_state['drafts']['demo-print'].replace('사업자등록번호: ', '사업자등록번호: 123-45-67890', 1)
+             .replace('단가(원): ', '단가(원): 90', 1).replace('포함 / 별도 (하나만 남겨 주세요)', '포함')
+             .replace('배송비(원, 세금 포함): ', '배송비(원, 세금 포함): 0', 1)
+             .replace('추가 비용(원, 설치·디자인 등, 세금 포함): ', '추가 비용(원, 설치·디자인 등, 세금 포함): 0', 1))
+    at.button(key='n4_next').click().run()
+    at.text_area(key='quote_text').set_value(reply)
+    at.button(key='extract_submit').click().run()
+    assert calls == [{'b_no': ['1234567890']}]  # 붙여 넣는 순간 한 번 조회한다
+    assert at.session_state['nts']['demo-print']['label'] == '폐업자'
+    next(w for w in at.checkbox if w.label == '견적서 원문과 대조해 입력값을 확인했습니다').check()
+    at.button(key='save_quote').click().run()
+    at.button(key='n5_next').click().run()
+    card = next(str(h.proto) for h in at.get('html') if 'tis-cards' in str(h.proto))
+    assert '국세청: 폐업자' in card and '거래 전 꼭 확인하세요' in card

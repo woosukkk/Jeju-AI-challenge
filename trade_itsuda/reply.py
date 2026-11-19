@@ -14,7 +14,7 @@ from .models import QuoteExtraction
 START = '[회신 양식]'
 END = '[회신 양식 끝]'
 # 양식의 칸 이름 → 견적 필드. 칸 이름 안에는 콜론(:)을 쓰지 않는다(값과 구분하기 위해).
-FIELDS = [('문의 업체', 'company_name'), ('단가(원)', 'unit_price'), ('부가세', 'tax'), ('별도일 때 세율(%)', 'tax_rate'),
+FIELDS = [('문의 업체', 'company_name'), ('사업자등록번호', 'business_number'), ('단가(원)', 'unit_price'), ('부가세', 'tax'), ('별도일 때 세율(%)', 'tax_rate'),
           ('배송비(원, 세금 포함)', 'shipping'), ('추가 비용(원, 설치·디자인 등, 세금 포함)', 'extra_cost'),
           ('최소 주문 수량', 'minimum_order'), ('납기(일)', 'lead_days'), ('견적 유효기간(YYYY-MM-DD)', 'valid_until')]
 TAX_CHOICES = '포함 / 별도 (하나만 남겨 주세요)'
@@ -60,6 +60,8 @@ def parse_reply(text: str) -> QuoteExtraction | None:
     values: dict = {}
     if raw.get('company_name'):
         values['company_name'] = raw['company_name'][:200]
+    if raw.get('business_number'):
+        values['business_number'] = raw['business_number']  # 형식 검사는 QuoteExtraction이 한다(틀리면 비움)
     for field in ('unit_price', 'shipping', 'extra_cost', 'minimum_order'):
         number = amount(raw.get(field, '')) if raw.get(field) else None
         if number is not None and not (field == 'minimum_order' and number == 0):

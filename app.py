@@ -167,6 +167,7 @@ st.html('''<style>
 .tis-badge.pricier { background: #fbebeb; color: #b42318; }
 .tis-badge.blocked { background: #f9eeda; color: #7a5200; }
 .tis-nts { margin: 8px 0 0; font-size: 0.8rem; color: #464c53; }
+.tis-nts.warn { color: #b42318; font-weight: 700; }
 .tis-card ul { margin: 10px 0 0; padding: 0; list-style: none; font-size: 0.8rem; color: #464c53; }
 .tis-card li::before { content: "☐ "; color: #9e6a00; }
 .tis-ai-cols h5 { font-size: 0.9rem; margin: 0 0 4px; }
@@ -631,6 +632,18 @@ def step_inquiry() -> None:
             go(5)
 
 
+def check_business(target: str, number: str, nts_ready: bool) -> str:
+    """회신·견적서에서 찾은 사업자번호로 국세청 상태를 바로 조회해 6단계 비교에 쓴다. 결과 안내 문장을 돌려준다."""
+    if not nts_ready:
+        return '사업자번호를 찾았지만 국세청 키가 없어 상태는 확인하지 않았어요.'
+    try:
+        st.session_state.nts[target] = lookup_status(number, config)
+    except ValueError as error:
+        return f'국세청 확인 실패: {error}'
+    label = st.session_state.nts[target]['label']
+    return f'국세청 확인: {label}.' + (' 거래 전에 꼭 확인하세요.' if label in ('휴업자', '폐업자') else '')
+
+
 # 비교에 필요한데 AI 추출에서 비기 쉬운 칸. 비어 있으면 5단계에서 주황으로 표시한다.
 CHECK_FIELDS = [('unit_price', '단가'), ('tax_included', '부가세 포함 여부'), ('shipping', '배송비'), ('extra_cost', '추가 비용'),
                 ('minimum_order', '최소 주문 수량'), ('lead_days', '납기'), ('valid_until', '유효기간')]
@@ -751,6 +764,11 @@ def step_quotes() -> None:
     if target == EXISTING:
         st.caption('기존 거래처 견적은 6단계에서 비교 기준이 됩니다.')
     nts_ready = bool(config.nts_key and config.allow_external_data)
+    if target in state.nts:
+        found = state.nts[target]
+        closed = found['label'] in ('휴업자', '폐업자')
+        st.html(f'<p class="tis-nts{" warn" if closed else ""}">국세청: {escape(found["label"])} '
+                f'({escape(found["checked_at"][:10])} 확인){" · 거래 전 꼭 확인하세요" if closed else ""}</p>')
     with st.expander('사업자 상태 확인 (선택) · 국세청'):
         st.caption('사업자번호를 알면 국세청에서 계속·휴업·폐업 여부를 확인해 6단계 비교에 함께 보여 줘요. '
                    '상태가 품질·납품 능력을 보증하지는 않습니다.' + ('' if nts_ready else ' 국세청 API 키가 없어 지금은 쓸 수 없습니다.'))
@@ -795,6 +813,9 @@ def step_quotes() -> None:
                         draft = extract_quote(config, raw)
                     state.extracted = {'target': target, 'values': draft.model_dump(mode='json', exclude_none=True), 'source': 'ai'}
                     state.flash = '추출값을 채웠습니다. 원문과 대조하고 빠진 조건을 입력하세요.'
+                number = state.extracted['values'].get('business_number')
+                if number:
+                    state.flash += ' ' + check_business(state.extracted['target'], number, nts_ready)
                 state.extraction_version += 1
                 st.rerun()
             except AgentError as error:
@@ -858,7 +879,9 @@ def result_cards(rows: list[Comparison], baseline_id: str, statuses: dict[str, d
         listing = f'<ul>{"".join(f"<li>{n}</li>" for n in notes)}</ul>' if notes else ''
         status = (statuses or {}).get(r.quote.id)
         if status:
-            listing += f'<p class="tis-nts">국세청: {escape(status["label"])} ({escape(status["checked_at"][:10])} 확인)</p>'
+            closed = status['label'] in ('휴업자', '폐업자')
+            listing += (f'<p class="tis-nts{" warn" if closed else ""}">국세청: {escape(status["label"])}'
+                        f' ({escape(status["checked_at"][:10])} 확인){" · 거래 전 꼭 확인하세요" if closed else ""}</p>')
         kind = 'base' if r is base else 'best' if r.quote.id == best_id else ''
         cards.append(f'<div class="tis-card {kind}"><div class="name">{escape(r.quote.company_name)}</div>'
                      f'{total}{badge}{listing}</div>')
