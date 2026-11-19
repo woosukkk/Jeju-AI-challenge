@@ -217,7 +217,7 @@ def count_ai(times: int = 1) -> None:
     st.session_state.ai_used += times
 
 
-@st.cache_resource(max_entries=2)
+@st.cache_resource(max_entries=2, show_spinner='제주 상가 데이터 57,347곳을 불러오는 중입니다. 서버를 켠 뒤 처음 한 번은 1분 가까이 걸릴 수 있어요.')
 def load_companies(path: str, version: int) -> list[Company]:
     # cache_data는 클릭(재실행)마다 5만 7천 곳을 복사(unpickle, 개발 PC 약 0.9초)한다. 목록은 고치지 않으므로 한 벌을 함께 쓴다.
     # version(파일 수정 시각)이 바뀌면 새로 읽는다.
