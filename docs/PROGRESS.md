@@ -98,3 +98,11 @@ HANDOFF·TODO를 추가하고 README에 진입 링크를 연결했다. 남은 �
 - 문의 초안 복사 버튼, '+ 다른 업체' 견적 회귀 테스트.
 - 화면 재실행 속도: 업체 목록 캐시를 공유 자원으로 바꿔 클릭마다 약 0.9초 들던 복사를 없앰(재실행 약 0.1초, AppTest 측정).
 - `pytest -q` 54 passed, `ty check` 통과.
+
+## 제출 준비 — 2026-11-19
+
+- 개발에 쓴 AI 도구(OpenAI Codex, Claude Code)와 범위를 THIRD_PARTY·기획서에 명시. 평가는 OpenAI만 쓰고 Gemini는 코드만 남김.
+- README를 심사위원용으로 다시 씀(설치 3단계, 제출 요구 항목별 파일 안내). 기획서 PDF(A4 13쪽)를 `docs/proposal.pdf`로 추가.
+- `make_submission.py --env`: 평가용 `.env`에 OpenAI 키만 담고 국세청·Gemini 키는 넣지 않음.
+- 최종 확인: 평가용 `.env`를 넣은 ZIP을 새 폴더에 풀어 setup 274초 → import_data 16초 → run → 첫 화면 약 45초 → AI 검색 성공('택배 박스' → 포장 업소, AI 켜짐). 확인 후 키가 든 시험 ZIP·폴더는 지움.
+- `pytest -q` 55 passed, `ty check` 통과.
