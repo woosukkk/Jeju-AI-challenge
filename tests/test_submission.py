@@ -15,3 +15,17 @@ def test_submission_rejects_keys_databases_and_environments():
         assert ok(name, b''), name
     assert ok('docs/MANUAL.md', b'key AIza' + b'x' * 35)
     assert ok('app.py', b'sk-' + b'a' * 30)
+
+
+
+def test_evaluation_env_keeps_only_the_openai_key():
+    import pytest
+    text = ('LLM_PROVIDER=openai\nOPENAI_API_KEY="sk-test-evaluation"\nGEMINI_API_KEY=gem-secret\n'
+            'NTS_API_KEY=nts-secret\nALLOW_EXTERNAL_DATA=false\nDATABASE_PATH=C:/Users/me/data.sqlite3\n')
+    out = make_submission.evaluation_env(text)
+    assert 'OPENAI_API_KEY=sk-test-evaluation' in out and 'ALLOW_EXTERNAL_DATA=true' in out
+    assert 'gem-secret' not in out and 'nts-secret' not in out and 'C:/Users' not in out
+    assert 'AI_SESSION_LIMIT=30' in out and 'DATABASE_PATH=data/trade_itsuda.sqlite3' in out
+    for bad in ['LLM_PROVIDER=gemini\nOPENAI_API_KEY=x', 'LLM_PROVIDER=openai\nOPENAI_API_KEY=']:
+        with pytest.raises(ValueError):
+            make_submission.evaluation_env(bad)
