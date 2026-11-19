@@ -106,3 +106,9 @@ HANDOFF·TODO를 추가하고 README에 진입 링크를 연결했다. 남은 �
 - `make_submission.py --env`: 평가용 `.env`에 OpenAI 키만 담고 국세청·Gemini 키는 넣지 않음.
 - 최종 확인: 평가용 `.env`를 넣은 ZIP을 새 폴더에 풀어 setup 274초 → import_data 16초 → run → 첫 화면 약 45초 → AI 검색 성공('택배 박스' → 포장 업소, AI 켜짐). 확인 후 키가 든 시험 ZIP·폴더는 지움.
 - `pytest -q` 55 passed, `ty check` 통과.
+
+## 업체 회신 바로 넣기 — 2026-11-19
+
+- 문의 초안 끝에 '[회신 양식]'을 붙이고, 5단계에 채워진 회신을 붙여 넣으면 AI 없이 칸을 채우고 업체를 골라 줌(`trade_itsuda/reply.py`).
+- 화면 확인: 표선간판이 골라져 있을 때 조아간판 회신을 붙여 넣자 조아간판으로 바뀌고 7칸이 채워짐.
+- `pytest -q` 60 passed, `ty check` 통과. 제출 ZIP·기획서 PDF는 아직 다시 만들지 않음.
