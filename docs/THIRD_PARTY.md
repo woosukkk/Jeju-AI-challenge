@@ -4,14 +4,25 @@
 
 | 구성 | 사용 범위·상태 | 공식 출처 |
 |---|---|---|
-| OpenAI API | Gemini와 같은 기능. 기본 모델 ID `gpt-5.4-mini`, 환경 변수로 변경. 2026-11-18 실키로 5가지 기능 호출 성공(검색 Agent 4.8~9.4초, 비교 해설 3.9초, 문의 질문 2.5초, 견적 추출 2.6초), 실제 데이터 12개 질의 모두 성공·429 없음 | https://platform.openai.com/docs |
-| Gemini API | 검색 Agent(분류 확인·검색·지역 집계 도구)·비교 해설·문의 질문·견적 추출. OpenAI 호환 엔드포인트 사용. 기본 ID `gemini-3.5-flash-lite`, 환경 변수로 변경. 2026-11-17 실키로 5가지 기능 호출 성공(호출당 1.8~6.2초). 같은 날 `gemini-3.8-flash`는 503 수요 과다·35초 시간 초과 반복 | https://ai.google.dev/gemini-api/docs/openai |
+| OpenAI API | 평가·시연에 쓰는 공급자. 검색 Agent·비교 해설·문의 질문·견적 추출. 기본 모델 ID `gpt-5.4-mini`, 환경 변수로 변경. 2026-11-18 실키로 5가지 기능 호출 성공(검색 Agent 4.8~9.4초, 비교 해설 3.9초, 문의 질문 2.5초, 견적 추출 2.6초), 실제 데이터 12개 질의 모두 성공·429 없음 | https://platform.openai.com/docs |
+| Gemini API | 선택 공급자(평가·시연에는 쓰지 않음, 코드만 남김). 검색 Agent(분류 확인·검색·지역 집계 도구)·비교 해설·문의 질문·견적 추출. OpenAI 호환 엔드포인트 사용. 기본 ID `gemini-3.5-flash-lite`, 환경 변수로 변경. 2026-11-17 실키로 5가지 기능 호출 성공(호출당 1.8~6.2초). 같은 날 `gemini-3.8-flash`는 503 수요 과다·35초 시간 초과 반복 | https://ai.google.dev/gemini-api/docs/openai |
 | 국세청 상태조회 | `/api/nts-businessman/v1/status`, 사업자번호로 상태·폐업일 조회. 2026-11-18 실키로 공개된 법인 사업자번호를 조회해 0.56초에 '계속사업자', 24시간 캐시 재사용, 미등록 번호 '확인 불가'를 확인. 상가 데이터에는 사업자번호가 없어, 5단계에서 사용자가 사업자번호를 넣을 때 조회한다 | https://www.data.go.kr/data/15081808/openapi.do |
 | Pretendard GOV (글꼴) | 화면 글꼴. `.streamlit/config.toml`에서 jsDelivr CDN(v1.3.9, `pretendardvariable-gov-dynamic-subset.min.css`)으로 불러오고, 인터넷이 없으면 맑은 고딕·sans-serif로 대체. SIL Open Font License 1.1 | https://github.com/orioncactus/pretendard |
 | KRDS 디자인 기준 | 범정부 UI/UX 디자인 시스템 표준형 색상(primary-50 `#256ef4` 등)·단계 표시기·신청서 작성 패턴을 참고해 화면 색과 구성을 정함. 코드·이미지는 가져오지 않음 | https://www.krds.go.kr |
 | multilingual-e5-small | 선택 설치 CPU 로컬 임베딩, query/passages prefix와 코사인 검색. 모델 파일 미탑재·실모델 미검증 | https://huggingface.co/intfloat/multilingual-e5-small |
 
 OpenAI `gpt-5.4-mini` 표준 요금은 입력 100만 토큰당 0.75달러, 출력 4.50달러다(2026-11-18 https://developers.openai.com/api/docs/pricing). 실제 호출 토큰으로 계산한 비용은 [결과 설명](RESULTS.md)에 있다. LLM 공급자·모델 ID는 화면에 표시한다. API 응답 품질·이용 가능 모델·요금은 계정별로 실제 확인해야 한다. 외부 API 전송은 `ALLOW_EXTERNAL_DATA`로 차단하며 기본값 false다. 이 설정은 원천 이용 허가를 대체하지 않는다.
+
+## 개발에 사용한 AI 도구
+
+대회 규칙(생성형 AI·AI 개발 도구 사용 시 명시)에 따라 적는다. 기획·판단·데이터 이용조건 확인·최종 검토와 제출 결정은 참가자가 했다.
+
+| 도구 | 쓴 범위 |
+|---|---|
+| OpenAI Codex (AI 코딩 도구) | 2026-11-17 초기 구현: 제품 범위 문서, 데이터 저장·반입, 검색, 견적 비교, 검색 Agent·견적 추출, 국세청 조회, 관심 집계, 보고서, 첫 화면(커밋 830d8ac~d71e7a5, 브랜치 이름 `codex/core-features`) |
+| Anthropic Claude Code (Claude Opus 5.5) | 2026-11-17~19 구현 검토와 보완: 실제 데이터 반입·검색 개선, Agent 실호출 검증과 수정, 6단계 화면·디자인, 측정 스크립트, 제출 ZIP 도구, 문서·기획서 초안 작성. 해당 커밋에 `Co-Authored-By: Claude` 표기 |
+
+앱이 실행 중에 쓰는 AI는 위 '모델과 외부 API' 표의 OpenAI API다. 개발 도구는 제출물 실행에 필요하지 않다.
 
 ## 직접 사용하는 라이브러리
 

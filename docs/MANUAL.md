@@ -21,7 +21,7 @@ Copy-Item .env.example .env  # 최초 1회. 기존 .env가 있으면 덮어쓰�
 
 | 항목 | 설정 |
 |---|---|
-| LLM_PROVIDER | `openai`(기본, 권장) 또는 `gemini`. 2026-11-18 측정에서 무료 Gemini 키는 연속 검색 5번 만에 429(호출 한도)가 났고, OpenAI 키는 12번 연속에도 나지 않아 예시 기본값을 `openai`로 둔다 |
+| LLM_PROVIDER | `openai`(평가·시연에 사용, 기본). `gemini`도 코드는 남아 있지만 무료 키가 연속 검색 5번 만에 429(호출 한도)에 걸려 평가에는 쓰지 않는다 |
 | LLM_MODEL | 비워두면 공급자 기본값. 사용하는 계정에서 허용된 모델 ID로 변경 가능 |
 | OPENAI_API_KEY | OpenAI를 선택한 경우의 키 |
 | GEMINI_API_KEY | Gemini를 선택한 경우의 키 |
