@@ -6,7 +6,7 @@
 |---|---|---|
 | OpenAI API | 평가·시연에 쓰는 공급자. 검색 Agent·비교 해설·문의 질문·견적 추출. 기본 모델 ID `gpt-5.4-mini`, 환경 변수로 변경. 2026-11-18 실키로 5가지 기능 호출 성공(검색 Agent 4.8~9.4초, 비교 해설 3.9초, 문의 질문 2.5초, 견적 추출 2.6초), 실제 데이터 12개 질의 모두 성공·429 없음 | https://platform.openai.com/docs |
 | Gemini API | 선택 공급자(평가·시연에는 쓰지 않음, 코드만 남김). 검색 Agent(분류 확인·검색·지역 집계 도구)·비교 해설·문의 질문·견적 추출. OpenAI 호환 엔드포인트 사용. 기본 ID `gemini-3.5-flash-lite`, 환경 변수로 변경. 2026-11-17 실키로 5가지 기능 호출 성공(호출당 1.8~6.2초). 같은 날 `gemini-3.8-flash`는 503 수요 과다·35초 시간 초과 반복 | https://ai.google.dev/gemini-api/docs/openai |
-| 국세청 상태조회 | `/api/nts-businessman/v1/status`, 사업자번호로 상태·폐업일 조회. 2026-11-18 실키로 공개된 법인 사업자번호를 조회해 0.56초에 '계속사업자', 24시간 캐시 재사용, 미등록 번호 '확인 불가'를 확인. 상가 데이터에는 사업자번호가 없어, 5단계에서 사용자가 사업자번호를 넣을 때 조회한다 | https://www.data.go.kr/data/15081808/openapi.do |
+| 국세청 상태조회 | `/api/nts-businessman/v1/status`, 사업자번호로 상태·폐업일 조회. 2026-11-18 실키로 공개된 법인 사업자번호를 조회해 0.56초에 '계속사업자', 24시간 캐시 재사용, 미등록 번호 '확인 불가'를 확인. 상가 데이터에는 사업자번호가 없어, 업체 회신·견적서에 적힌 사업자번호로 자동 조회하거나 5단계에서 직접 넣어 조회한다 | https://www.data.go.kr/data/15081808/openapi.do |
 | Pretendard GOV (글꼴) | 화면 글꼴. `.streamlit/config.toml`에서 jsDelivr CDN(v1.3.9, `pretendardvariable-gov-dynamic-subset.min.css`)으로 불러오고, 인터넷이 없으면 맑은 고딕·sans-serif로 대체. SIL Open Font License 1.1 | https://github.com/orioncactus/pretendard |
 | KRDS 디자인 기준 | 범정부 UI/UX 디자인 시스템 표준형 색상(primary-50 `#256ef4` 등)·단계 표시기·신청서 작성 패턴을 참고해 화면 색과 구성을 정함. 코드·이미지는 가져오지 않음 | https://www.krds.go.kr |
 | multilingual-e5-small | 선택 설치 CPU 로컬 임베딩, query/passages prefix와 코사인 검색. 모델 파일 미탑재·실모델 미검증 | https://huggingface.co/intfloat/multilingual-e5-small |
