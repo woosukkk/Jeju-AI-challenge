@@ -29,12 +29,18 @@ def settings() -> Settings:
     return Settings(
         database_path=Path(os.getenv('DATABASE_PATH', 'data/trade_itsuda.sqlite3')),
         provider=provider,
-        model=os.getenv('LLM_MODEL', '').strip() or default_model,
+        model=model_id(os.getenv('LLM_MODEL', ''), default_model),
         llm_key=os.getenv('GEMINI_API_KEY' if provider == 'gemini' else 'OPENAI_API_KEY', ''),
         nts_key=os.getenv('NTS_API_KEY', ''),
         allow_external_data=os.getenv('ALLOW_EXTERNAL_DATA', 'false').lower() == 'true',
         ai_session_limit=session_limit(os.getenv('AI_SESSION_LIMIT', '30')),
     )
+
+
+def model_id(value: str, default: str) -> str:
+    """LLM_MODEL에 공급자 이름(openai·gemini)을 잘못 적으면 기본 모델을 쓴다. 비어 있어도 기본 모델."""
+    value = value.strip()
+    return default if not value or value.lower() in {'openai', 'gemini'} else value
 
 
 def session_limit(value: str) -> int:

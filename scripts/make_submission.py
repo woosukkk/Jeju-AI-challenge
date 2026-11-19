@@ -54,12 +54,15 @@ def evaluation_env(text: str) -> str:
     key = values.get('OPENAI_API_KEY', '')
     if not key:
         raise ValueError('평가용 .env에 OPENAI_API_KEY가 없습니다.')
+    model = values.get('LLM_MODEL', '')
+    if model.lower() in {'openai', 'gemini'} or ' ' in model:
+        raise ValueError(f'LLM_MODEL에는 모델 이름(예: gpt-5.4-mini)을 적거나 비워 두세요. 지금 값: {model}')
     limit = values.get('AI_SESSION_LIMIT', '30') or '30'
     if not limit.isdigit():
         raise ValueError('AI_SESSION_LIMIT는 0 이상의 정수여야 합니다.')
     return '\n'.join([
         '# 평가용 설정: 사용 한도를 건 OpenAI 키(평가 후 폐기). 국세청 키는 공공데이터포털에서 직접 발급해 넣는다(매뉴얼 참고).',
-        'LLM_PROVIDER=openai', f"LLM_MODEL={values.get('LLM_MODEL', '')}", f'OPENAI_API_KEY={key}',
+        'LLM_PROVIDER=openai', f'LLM_MODEL={model}', f'OPENAI_API_KEY={key}',
         'GEMINI_API_KEY=', 'NTS_API_KEY=', 'ALLOW_EXTERNAL_DATA=true',
         'DATABASE_PATH=data/trade_itsuda.sqlite3', f'AI_SESSION_LIMIT={limit}', ''])
 
