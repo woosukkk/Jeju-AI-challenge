@@ -4,6 +4,8 @@
 
 ## 설치와 실행 (Windows, Python 3.11)
 
+**준비물**: Windows 10/11, [Python 3.11](https://www.python.org/downloads/)(설치할 때 "Add python.exe to PATH" 체크), 인터넷(첫 설치와 AI 호출). GPU는 필요 없습니다. Python이 없으면 setup.bat이 설치 방법을 안내합니다.
+
 1. `setup.bat` 실행: 가상환경을 만들고 패키지를 설치합니다(첫 설치 약 3~4분, 인터넷 필요).
 2. `import_data.bat` 실행: 제출 ZIP에 든 `data_source\jeju_store.csv`(상가 데이터)를 로컬 DB로 가져옵니다(약 10초).
 3. `run.bat` 실행 후 브라우저에서 <http://localhost:8501>을 엽니다. 서버를 처음 켠 뒤 첫 화면은 데이터를 읽느라 1분 가까이 걸릴 수 있습니다(새 폴더 설치 확인에서 약 45초). 화면에 "불러오는 중" 문구가 보이면 기다려 주세요.
